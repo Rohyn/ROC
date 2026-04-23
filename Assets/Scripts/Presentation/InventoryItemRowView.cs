@@ -65,6 +65,8 @@ public class InventoryItemRowView : MonoBehaviour, IPointerClickHandler
             return;
         }
 
+        Debug.Log($"[InventoryItemRowView] Clicked row for {_itemId} with button {eventData.button}");
+
         if (eventData.button == PointerEventData.InputButton.Right)
         {
             _onRightClick?.Invoke(_itemId, _rowCollection, _isEquippable);

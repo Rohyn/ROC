@@ -14,3 +14,5 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::ROC.Inventory.ItemCatalog
   definitions:
   - {fileID: 11400000, guid: 23180f62ae60e0f46aff6a9881feb9a1, type: 2}
+  - {fileID: 11400000, guid: 7d7f21a6f7c0e1542b877579a8d95b57, type: 2}
+  - {fileID: 11400000, guid: 8935dcf8f8b9a514498ee5cb1d531ecb, type: 2}

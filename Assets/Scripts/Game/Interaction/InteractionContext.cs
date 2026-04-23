@@ -9,11 +9,6 @@ using ROC.Inventory;
 /// This keeps action code generic:
 /// actions do not need to know specific player script names in advance.
 /// They can query what they need from the interacting object.
-///
-/// Later, this can be expanded with:
-/// - skill manager
-/// - faction/reputation
-/// - source item/tool used for interaction
 /// </summary>
 public sealed class InteractionContext
 {
@@ -28,6 +23,7 @@ public sealed class InteractionContext
     public CharacterController InteractorCharacterController { get; }
     public PlayerAnchorState InteractorAnchorState { get; }
     public PlayerInventory InteractorInventory { get; }
+    public PlayerProgressState InteractorProgressState { get; }
 
     public bool StopFurtherActions { get; set; }
 
@@ -42,6 +38,7 @@ public sealed class InteractionContext
             InteractorCharacterController = InteractorObject.GetComponent<CharacterController>();
             InteractorAnchorState = InteractorObject.GetComponent<PlayerAnchorState>();
             InteractorInventory = InteractorObject.GetComponent<PlayerInventory>();
+            InteractorProgressState = InteractorObject.GetComponent<PlayerProgressState>();
         }
 
         StopFurtherActions = false;

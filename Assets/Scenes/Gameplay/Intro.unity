@@ -838,6 +838,8 @@ GameObject:
   - component: {fileID: 1145310282}
   - component: {fileID: 1145310281}
   - component: {fileID: 1145310280}
+  - component: {fileID: 1145310284}
+  - component: {fileID: 1145310283}
   m_Layer: 0
   m_Name: DoorRoot
   m_TagString: Untagged
@@ -905,7 +907,7 @@ MonoBehaviour:
   requiredItemToOpen: {fileID: 11400000, guid: 23180f62ae60e0f46aff6a9881feb9a1, type: 2}
   requiredItemQuantity: 1
   consumeRequiredItemOnSuccessfulOpen: 1
-  stopFurtherActionsOnFailure: 1
+  stopFurtherActionsOnFailure: 0
   verboseLogging: 1
 --- !u!114 &1145310281
 MonoBehaviour:
@@ -951,6 +953,43 @@ MonoBehaviour:
   consumptionMode: 0
   hidePresentationWhenConsumed: 1
   verboseLogging: 1
+--- !u!114 &1145310283
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1145310277}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f81c6deb80e43674aa744568fa994e9b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::GrantProgressFlagAction
+  executionOrder: 1
+  flagsToGrant:
+  - intro.tried_infirmary_door
+  onlyIfMissingAnyBagItems:
+  - {fileID: 11400000, guid: 23180f62ae60e0f46aff6a9881feb9a1, type: 2}
+  stopFurtherActionsAfterGrant: 0
+  verboseLogging: 1
+--- !u!114 &1145310284
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1145310277}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6a4f664205ecc5b448cb1fd030d08e00, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::InteractableAvailabilityRules
+  requiredProgressFlags: []
+  blockedProgressFlags: []
+  requiredBagItems: []
+  requiredEquippedItems:
+  - {fileID: 11400000, guid: 7d7f21a6f7c0e1542b877579a8d95b57, type: 2}
+  verboseLogging: 0
 --- !u!1 &1154487638
 GameObject:
   m_ObjectHideFlags: 0
@@ -1432,6 +1471,7 @@ GameObject:
   - component: {fileID: 1876646794}
   - component: {fileID: 1876646796}
   - component: {fileID: 1876646795}
+  - component: {fileID: 1876646797}
   m_Layer: 0
   m_Name: Key
   m_TagString: Untagged
@@ -1597,6 +1637,24 @@ MonoBehaviour:
   consumptionMode: 1
   hidePresentationWhenConsumed: 1
   verboseLogging: 1
+--- !u!114 &1876646797
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1876646789}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6a4f664205ecc5b448cb1fd030d08e00, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::InteractableAvailabilityRules
+  requiredProgressFlags:
+  - intro.tried_infirmary_door
+  blockedProgressFlags: []
+  requiredBagItems: []
+  requiredEquippedItems: []
+  verboseLogging: 0
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

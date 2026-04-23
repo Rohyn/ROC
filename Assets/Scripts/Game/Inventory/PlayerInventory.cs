@@ -17,10 +17,10 @@ namespace ROC.Inventory
     ///
     /// CURRENT SCOPE:
     /// - add/remove items from bags
-    /// - move one unit of an equippable item from bags -> equipped
-    /// - move one unit from equipped -> bags
+    /// - move one quantity of an equippable item from bag -> equipped
+    /// - move one quantity from equipped -> bag
     ///
-    /// INTENTIONAL LIMITATION:
+    /// INTENTIONAL LIMITATIONS:
     /// - no equipment slot rules yet
     /// - if an item is equippable and you have multiple copies, multiple copies can be equipped
     /// - that is acceptable for this milestone and can be restricted later
@@ -145,9 +145,22 @@ namespace ROC.Inventory
             return changed;
         }
 
+        /// <summary>
+        /// Convenience bag-only check.
+        /// </summary>
         public bool HasItem(ItemDefinition itemDefinition, int minimumQuantity = 1)
         {
-            return GetQuantity(itemDefinition, InventoryCollection.Bag) >= minimumQuantity;
+            return HasItem(itemDefinition, InventoryCollection.Bag, minimumQuantity);
+        }
+
+        public bool HasItem(ItemDefinition itemDefinition, InventoryCollection collection, int minimumQuantity = 1)
+        {
+            return GetQuantity(itemDefinition, collection) >= minimumQuantity;
+        }
+
+        public bool HasItemById(string itemId, InventoryCollection collection, int minimumQuantity = 1)
+        {
+            return GetQuantityByItemId(itemId, collection) >= minimumQuantity;
         }
 
         public int GetQuantity(ItemDefinition itemDefinition, InventoryCollection collection = InventoryCollection.Bag)

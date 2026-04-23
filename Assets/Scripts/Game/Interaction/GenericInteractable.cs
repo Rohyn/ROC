@@ -51,6 +51,7 @@ public class GenericInteractable : NetworkBehaviour
     [SerializeField] private bool verboseLogging = true;
 
     private readonly List<InteractableAction> _actions = new();
+    private readonly List<InteractableAvailabilityRules> _availabilityRules = new();
 
     // ---------------------------------------------------------------------
     // Replicated consumption state
@@ -93,6 +94,7 @@ public class GenericInteractable : NetworkBehaviour
     private void Awake()
     {
         CacheActions();
+        CacheAvailabilityRules();
         CachePresentationComponents();
     }
 
@@ -124,6 +126,13 @@ public class GenericInteractable : NetworkBehaviour
     {
         _cachedRenderers = GetComponentsInChildren<Renderer>(true);
         _cachedColliders = GetComponentsInChildren<Collider>(true);
+    }
+    private void CacheAvailabilityRules()
+    {
+        _availabilityRules.Clear();
+
+        InteractableAvailabilityRules[] rules = GetComponents<InteractableAvailabilityRules>();
+        _availabilityRules.AddRange(rules);
     }
 
     private void OnValidate()
@@ -183,6 +192,22 @@ public class GenericInteractable : NetworkBehaviour
         if (!IsServer && _locallyConsumedForThisClient)
         {
             return false;
+        }
+
+        InteractionContext context = new InteractionContext(interactorObject);
+
+        for (int i = 0; i < _availabilityRules.Count; i++)
+        {
+            InteractableAvailabilityRules rules = _availabilityRules[i];
+            if (rules == null)
+            {
+                continue;
+            }
+
+            if (!rules.CanInteract(context))
+            {
+                return false;
+            }
         }
 
         // -------------------------------------------------------------
