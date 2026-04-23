@@ -137,5 +137,6 @@ public class MainMenuView : MonoBehaviour
                 ? "Ready"
                 : statusMessage;
         }
+        Debug.Log($"[MainMenuView] ApplyState called. isConnecting={isConnecting}, status='{statusMessage}'");
     }
 }

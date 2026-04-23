@@ -105,6 +105,27 @@ public class AppFlowController : MonoBehaviour
         }
     }
 
+    private void OnEnable()
+    {
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.SceneManager != null)
+        {
+            NetworkManager.Singleton.SceneManager.OnSceneEvent += HandleClientSceneEventDebug;
+        }
+    }
+
+    private void OnDisable()
+    {
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.SceneManager != null)
+        {
+            NetworkManager.Singleton.SceneManager.OnSceneEvent -= HandleClientSceneEventDebug;
+        }
+    }
+
+    private void HandleClientSceneEventDebug(SceneEvent sceneEvent)
+    {
+        Debug.Log($"[AppFlowController] Client Scene Event: type={sceneEvent.SceneEventType}, scene={sceneEvent.SceneName}, clientId={sceneEvent.ClientId}");
+    }
+
     private void Start()
     {
 #if UNITY_SERVER
@@ -225,18 +246,10 @@ public class AppFlowController : MonoBehaviour
             return;
         }
 
-        // Ignore callbacks that are not for this local client.
-        if (clientId != networkManager.LocalClientId)
-        {
-            return;
-        }
-
-        Debug.Log("[AppFlowController] Local client connected successfully.");
+        Debug.Log($"[AppFlowController] OnClientConnectedCallback fired. callbackClientId={clientId}, localClientId={networkManager.LocalClientId}");
 
         CleanupConnectionCallbacks();
 
-        // We are no longer "connecting", but we are also not yet moving scenes here.
-        // For now, leave the menu in a waiting state until later server-driven scene flow exists.
         SetConnectionState(false, "Connected. Waiting for server...");
     }
 
@@ -253,7 +266,6 @@ public class AppFlowController : MonoBehaviour
     {
         NetworkManager networkManager = NetworkManager.Singleton;
 
-        // If the NetworkManager is already gone, we still want to reset the UI state.
         if (networkManager == null)
         {
             CleanupConnectionCallbacks();
@@ -261,13 +273,8 @@ public class AppFlowController : MonoBehaviour
             return;
         }
 
-        // Ignore callbacks that are not for this local client.
-        if (clientId != networkManager.LocalClientId)
-        {
-            return;
-        }
+        Debug.Log($"[AppFlowController] OnClientDisconnectCallback fired. callbackClientId={clientId}, localClientId={networkManager.LocalClientId}");
 
-        // NGO can provide a disconnect reason if the server supplied one.
         string disconnectReason = networkManager.DisconnectReason;
 
         if (string.IsNullOrWhiteSpace(disconnectReason))
@@ -282,8 +289,6 @@ public class AppFlowController : MonoBehaviour
         }
 
         CleanupConnectionCallbacks();
-
-        // For now, the user simply remains on the main menu scene.
     }
 
     /// <summary>

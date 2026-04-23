@@ -10,7 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1979638916084192685}
   m_Layer: 0
-  m_Name: CameraSocket
+  m_Name: CameraPivot
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -24,8 +24,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7148853489544243051}
   serializedVersion: 2
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 0.5, z: 0}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 1.6, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -43,8 +43,13 @@ GameObject:
   - component: {fileID: 981331502509993411}
   - component: {fileID: 1764292862385314437}
   - component: {fileID: 4667214124003231594}
+  - component: {fileID: 1538894705637957295}
   - component: {fileID: 8636291666918327823}
   - component: {fileID: 8786170909034869728}
+  - component: {fileID: 2940125702930771596}
+  - component: {fileID: 8194632222965225880}
+  - component: {fileID: 4987125017315522936}
+  - component: {fileID: 6740206874064545595}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -148,6 +153,31 @@ CapsuleCollider:
   m_Height: 2
   m_Direction: 1
   m_Center: {x: 0, y: 0, z: 0}
+--- !u!143 &1538894705637957295
+CharacterController:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Height: 2
+  m_Radius: 0.5
+  m_SlopeLimit: 45
+  m_StepOffset: 0.3
+  m_SkinWidth: 0.08
+  m_MinMoveDistance: 0.001
+  m_Center: {x: 0, y: 0, z: 0}
 --- !u!114 &8636291666918327823
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -160,7 +190,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
-  GlobalObjectIdHash: 2132210247
+  GlobalObjectIdHash: 3760772638
   InScenePlacedSourceGlobalObjectIdHash: 0
   DeferredDespawnTick: 0
   Ownership: 1
@@ -186,6 +216,73 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerCameraBootstrap
   ShowTopMostFoldoutHeaderGroup: 1
-  cameraSocket: {fileID: 1979638916084192685}
+  cameraPivot: {fileID: 1979638916084192685}
+  cameraDistance: 4.5
+  cameraPitch: 20
+  sideOffset: 0
+  cameraFieldOfView: 65
   createCameraIfMissing: 1
-  fallbackFieldOfView: 60
+--- !u!114 &2940125702930771596
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6ac360e4de5f58a418ee4e2341b73faa, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NetworkPlayerMotor
+  ShowTopMostFoldoutHeaderGroup: 1
+  moveSpeed: 4.5
+  rotationSpeed: 5
+  jumpHeight: 1.2
+  gravity: -20
+  groundedStickForce: -2
+  cameraTransformOverride: {fileID: 0}
+  statusManager: {fileID: 8194632222965225880}
+--- !u!114 &8194632222965225880
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4ad13b5c14f9884418b06a1eff8a3b46, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ROC.Statuses.StatusManager
+  verboseLogging: 1
+--- !u!114 &4987125017315522936
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9028ae8a08f56e446b4262bdf44e2a4b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerInteractor
+  ShowTopMostFoldoutHeaderGroup: 1
+  interactDistance: 3
+  interactableMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  cameraTransformOverride: {fileID: 0}
+--- !u!114 &6740206874064545595
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f53806ead5467f7429a1ac8e2dc9e839, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerAnchorState
+  verboseLogging: 1
