@@ -4,20 +4,20 @@ using Unity.Netcode;
 using ROC.Statuses;
 
 /// <summary>
-/// Very first-pass player motor for testing character feel.
+/// First-pass local player motor for testing third-person movement feel.
 ///
-/// PURPOSE OF THIS SCRIPT:
-/// - Make the owning client's player controllable
-/// - Use CharacterController for movement
-/// - Move relative to the current camera direction
-/// - Apply gravity
-/// - Rotate the player toward their movement direction
+/// DESIGN GOALS:
+/// - Use CharacterController for simple grounded movement
+/// - Move relative to the current camera facing
+/// - Apply gravity and optional jump
+/// - Respect status flags such as NoMovement and NoRotation
+/// - Optionally rotate toward movement direction
 ///
 /// IMPORTANT:
-/// This is a LOCAL FEEL-TEST controller, not the final MMO movement architecture.
-/// It is intentionally simple so you can start tuning movement immediately.
-///
-/// Later, we should replace or extend this with a more server-authoritative design.
+/// This is still a local feel-test controller, not final server-authoritative MMO movement.
+/// It is meant to pair with PlayerLookController:
+/// - direct mouselook should usually control facing
+/// - rotateTowardMovement should usually be FALSE for that setup
 /// </summary>
 [RequireComponent(typeof(CharacterController))]
 public class NetworkPlayerMotor : NetworkBehaviour
@@ -26,11 +26,15 @@ public class NetworkPlayerMotor : NetworkBehaviour
     [Tooltip("How fast the player moves on the ground in units per second.")]
     [SerializeField] private float moveSpeed = 4.5f;
 
-    [Tooltip("How quickly the player rotates to face their movement direction.")]
+    [Tooltip("How quickly the player rotates to face movement direction when rotateTowardMovement is enabled.")]
     [SerializeField] private float rotationSpeed = 12f;
 
+    [Header("Facing")]
+    [Tooltip("If true, the player rotates to face movement direction. For direct mouselook, leave this false.")]
+    [SerializeField] private bool rotateTowardMovement = false;
+
     [Header("Jump / Gravity")]
-    [Tooltip("How high the player jumps in Unity units. Set to 0 if you want to disable jumping for now.")]
+    [Tooltip("How high the player jumps in Unity units. Set to 0 to disable jumping for now.")]
     [SerializeField] private float jumpHeight = 1.2f;
 
     [Tooltip("Gravity acceleration applied to the player. Negative value because down is negative Y.")]
@@ -47,13 +51,8 @@ public class NetworkPlayerMotor : NetworkBehaviour
     [Tooltip("Optional reference to the StatusManager on this player. If left empty, the script will try to find one on the same GameObject.")]
     [SerializeField] private StatusManager statusManager;
 
-    // Cached CharacterController reference.
     private CharacterController _characterController;
-
-    // Vertical velocity used for gravity and jumping.
     private float _verticalVelocity;
-
-    // Cached camera transform used to convert input into camera-relative movement.
     private Transform _cameraTransform;
 
     private void Awake()
@@ -66,6 +65,7 @@ public class NetworkPlayerMotor : NetworkBehaviour
             enabled = false;
             return;
         }
+
         if (statusManager == null)
         {
             statusManager = GetComponent<StatusManager>();
@@ -74,8 +74,7 @@ public class NetworkPlayerMotor : NetworkBehaviour
 
     public override void OnNetworkSpawn()
     {
-        // This controller should only process input for the owning client.
-        // Remote players should NOT try to read local keyboard input.
+        // Only the owning client should process local movement input.
         if (!IsOwner)
         {
             enabled = false;
@@ -97,14 +96,8 @@ public class NetworkPlayerMotor : NetworkBehaviour
             CacheCameraReference();
         }
 
-        // ---------------------------------------------------------------------
-        // Read movement input.
-        // ---------------------------------------------------------------------
         Vector2 moveInput = ReadMoveInput();
 
-        // ---------------------------------------------------------------------
-        // Query status restrictions and modifiers.
-        // ---------------------------------------------------------------------
         bool noMovement = statusManager != null && statusManager.HasFlag(StatusFlags.NoMovement);
         bool noRotation = statusManager != null && statusManager.HasFlag(StatusFlags.NoRotation);
 
@@ -114,8 +107,7 @@ public class NetworkPlayerMotor : NetworkBehaviour
             movementMultiplier = statusManager.GetMultiplicativeModifier(StatusModifierType.MoveSpeed);
         }
 
-        // If movement is blocked by statuses like Resting or Frozen,
-        // zero out the movement input before we convert it into world-space movement.
+        // If movement is blocked, ignore movement input entirely.
         if (noMovement)
         {
             moveInput = Vector2.zero;
@@ -125,7 +117,7 @@ public class NetworkPlayerMotor : NetworkBehaviour
 
         HandleGroundingAndGravity();
 
-        // Only allow jumping if movement is not locked.
+        // Only allow jumping when movement is not blocked.
         if (!noMovement)
         {
             HandleJumpInput();
@@ -137,22 +129,15 @@ public class NetworkPlayerMotor : NetworkBehaviour
 
         _characterController.Move(finalVelocity * Time.deltaTime);
 
-        if (!noRotation)
+        // In direct mouselook mode, leave this OFF so mouse/controller look owns facing.
+        if (!noRotation && rotateTowardMovement)
         {
             RotateTowardMovement(moveDirection);
         }
     }
 
     /// <summary>
-    /// Reads keyboard movement input using the Input System package.
-    ///
-    /// Returns:
-    /// - X = left/right
-    /// - Y = forward/back
-    ///
-    /// This is intentionally simple for now:
-    /// - W / S control forward and backward
-    /// - A / D control left and right
+    /// Reads simple WASD movement input using the Input System package directly.
     /// </summary>
     private Vector2 ReadMoveInput()
     {
@@ -184,7 +169,7 @@ public class NetworkPlayerMotor : NetworkBehaviour
             input.x -= 1f;
         }
 
-        // Normalize diagonal input so moving diagonally is not faster.
+        // Prevent diagonal movement from being faster than straight movement.
         input = Vector2.ClampMagnitude(input, 1f);
 
         return input;
@@ -199,23 +184,18 @@ public class NetworkPlayerMotor : NetworkBehaviour
     {
         Transform referenceTransform = _cameraTransform != null ? _cameraTransform : transform;
 
-        // Flatten the camera forward vector onto the ground plane.
-        // We do not want movement to tilt upward/downward just because the camera is pitched.
         Vector3 forward = referenceTransform.forward;
         forward.y = 0f;
         forward.Normalize();
 
-        // Flatten the camera right vector onto the ground plane as well.
         Vector3 right = referenceTransform.right;
         right.y = 0f;
         right.Normalize();
 
-        // Combine forward/back and left/right input into one world-space direction.
         Vector3 moveDirection =
             (forward * moveInput.y) +
             (right * moveInput.x);
 
-        // Clamp to avoid diagonal speed increases after vector combination.
         moveDirection = Vector3.ClampMagnitude(moveDirection, 1f);
 
         return moveDirection;
@@ -223,31 +203,23 @@ public class NetworkPlayerMotor : NetworkBehaviour
 
     /// <summary>
     /// Handles grounded behavior and gravity accumulation.
-    ///
-    /// CharacterController.isGrounded reflects the result of the last movement step,
-    /// so we use it each frame to decide how vertical velocity should behave.
+    /// CharacterController.isGrounded reflects the result of the last move step.
     /// </summary>
     private void HandleGroundingAndGravity()
     {
         if (_characterController.isGrounded)
         {
-            // When grounded, keep a slight downward velocity rather than leaving Y at zero.
-            // This helps the controller stay grounded more reliably on uneven surfaces.
             if (_verticalVelocity < 0f)
             {
                 _verticalVelocity = groundedStickForce;
             }
         }
 
-        // Gravity is always applied every frame.
         _verticalVelocity += gravity * Time.deltaTime;
     }
 
     /// <summary>
-    /// Handles jump input.
-    ///
-    /// Spacebar will launch the player upward only if grounded.
-    /// If you want no jumping yet, set jumpHeight to 0.
+    /// Handles jump input using Space.
     /// </summary>
     private void HandleJumpInput()
     {
@@ -264,18 +236,13 @@ public class NetworkPlayerMotor : NetworkBehaviour
 
         if (_characterController.isGrounded && keyboard.spaceKey.wasPressedThisFrame)
         {
-            // Basic jump formula:
-            // v = sqrt( jumpHeight * -2 * gravity )
-            //
-            // Since gravity is negative, this produces a positive upward launch velocity.
             _verticalVelocity = Mathf.Sqrt(jumpHeight * -2f * gravity);
         }
     }
 
     /// <summary>
-    /// Smoothly rotates the player to face the movement direction.
-    ///
-    /// If there is no movement input, the player keeps their current facing.
+    /// Smoothly rotates the player to face movement direction.
+    /// Only used when rotateTowardMovement is enabled.
     /// </summary>
     private void RotateTowardMovement(Vector3 moveDirection)
     {
@@ -294,10 +261,6 @@ public class NetworkPlayerMotor : NetworkBehaviour
 
     /// <summary>
     /// Finds the camera transform used for camera-relative movement.
-    ///
-    /// Preference order:
-    /// 1. Explicit Inspector-assigned transform
-    /// 2. Camera.main
     /// </summary>
     private void CacheCameraReference()
     {

@@ -75,19 +75,43 @@ public class PlayerInteractor : NetworkBehaviour
 	{
 	    if (_cameraTransform == null)
 	    {
-	        Debug.LogWarning("[PlayerInteractor] No camera transform available for interaction raycast.");
+	        Debug.LogWarning("[PlayerInteractor] No camera transform available for interaction query.");
 	        return;
 	    }
 
-	    Ray ray = new Ray(_cameraTransform.position, _cameraTransform.forward);
+	    // Start the interaction sweep from the player, not from the camera.
+	    // A point around lower chest / upper waist height is usually a good interaction origin.
+	    Vector3 origin = transform.position + Vector3.up * 1.0f;
 
-	    if (!Physics.Raycast(ray, out RaycastHit hit, interactDistance, interactableMask, QueryTriggerInteraction.Ignore))
+	    // Use the camera's facing direction, but flatten it onto the ground plane.
+	    // This makes "forward" match what the player sees without aiming sharply up/down.
+	    Vector3 direction = _cameraTransform.forward;
+	    direction.y = 0f;
+	    direction.Normalize();
+
+	    // Fallback safety in case the camera is looking almost straight up/down.
+	    if (direction.sqrMagnitude < 0.0001f)
 	    {
-	        Debug.Log("[PlayerInteractor] Raycast hit nothing.");
+	        direction = transform.forward;
+	    }
+
+	    // SphereCast is more forgiving than a thin ray for third-person interaction.
+	    if (!Physics.SphereCast(
+	            origin,
+	            0.35f,
+	            direction,
+	            out RaycastHit hit,
+	            interactDistance,
+	            interactableMask,
+	            QueryTriggerInteraction.Ignore))
+	    {
+	        Debug.Log("[PlayerInteractor] SphereCast hit nothing.");
+	        Debug.DrawRay(origin, direction * interactDistance, Color.red, 1.0f);
 	        return;
 	    }
 
-	    Debug.Log($"[PlayerInteractor] Raycast hit '{hit.collider.name}'.");
+	    Debug.Log($"[PlayerInteractor] SphereCast hit '{hit.collider.name}'.");
+	    Debug.DrawRay(origin, direction * hit.distance, Color.green, 1.0f);
 
 	    GenericInteractable interactable = hit.collider.GetComponentInParent<GenericInteractable>();
 	    if (interactable == null)
@@ -99,7 +123,6 @@ public class PlayerInteractor : NetworkBehaviour
 	    Debug.Log($"[PlayerInteractor] Found interactable '{interactable.name}'. Trying interaction.");
 
 	    bool success = interactable.TryInteract(gameObject);
-
 	    Debug.Log($"[PlayerInteractor] Interaction success = {success}");
 	}
 

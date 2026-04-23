@@ -3,7 +3,7 @@ using Unity.Netcode;
 
 /// <summary>
 /// Creates or reuses a local camera for the owning client and attaches it to
-/// the player prefab using a simple third-person MMO-style setup.
+/// the player prefab using a simple third-person camera rig.
 ///
 /// IMPORTANT:
 /// - Cameras are local-only presentation objects.
@@ -12,9 +12,9 @@ using Unity.Netcode;
 ///
 /// DESIGN INTENT:
 /// - The player prefab provides a CameraPivot transform in the hierarchy.
-/// - The script positions the camera relative to that pivot.
-/// - The pivot location is tuned in the prefab/editor.
-/// - The camera behavior values (distance, pitch, FOV) are tuned in the Inspector.
+/// - This script positions the camera relative to that pivot.
+/// - The pivot itself is responsible for pitch rotation via a separate look controller.
+/// - This script only handles camera placement, FOV, and ownership/cleanup.
 /// </summary>
 public class PlayerCameraBootstrap : NetworkBehaviour
 {
@@ -22,12 +22,12 @@ public class PlayerCameraBootstrap : NetworkBehaviour
     [Tooltip("Transform on the player prefab that acts as the camera pivot point. Usually near the upper chest / base of neck.")]
     [SerializeField] private Transform cameraPivot;
 
-    [Header("Camera Behavior")]
+    [Header("Camera Placement")]
     [Tooltip("How far behind the pivot the camera should sit.")]
     [SerializeField] private float cameraDistance = 4.5f;
 
-    [Tooltip("Downward pitch angle in degrees. Typical MMO values are around 12 to 18.")]
-    [SerializeField] private float cameraPitch = 15f;
+    [Tooltip("How far above the pivot the camera should sit.")]
+    [SerializeField] private float verticalOffset = 0.5f;
 
     [Tooltip("Optional left/right offset. Leave at 0 for a centered MMO-style camera.")]
     [SerializeField] private float sideOffset = 0f;
@@ -71,7 +71,11 @@ public class PlayerCameraBootstrap : NetworkBehaviour
     /// 1. Reuse an existing Main Camera if one already exists.
     /// 2. Otherwise create a new local camera.
     /// 3. Parent the camera to the pivot.
-    /// 4. Apply a local offset and local pitch to create a natural third-person view.
+    /// 4. Apply a local offset behind and above the pivot.
+    ///
+    /// IMPORTANT:
+    /// This script does NOT apply pitch.
+    /// Pitch should be controlled by a separate look controller that rotates the pivot.
     /// </summary>
     private void AttachLocalCamera()
     {
@@ -101,26 +105,26 @@ public class PlayerCameraBootstrap : NetworkBehaviour
         }
 
         _attachedCamera = cameraToUse;
+
+        // Ensure other systems can find this camera via Camera.main.
         _attachedCamera.gameObject.tag = "MainCamera";
 
-        // Apply the desired FOV.
+        // Apply the desired field of view.
         _attachedCamera.fieldOfView = cameraFieldOfView;
 
         Transform cameraTransform = _attachedCamera.transform;
 
         // Parent to the pivot.
-        // Using 'false' means we want to work in local space relative to the pivot.
+        // Using false means we want to work in local space relative to the pivot.
         cameraTransform.SetParent(cameraPivot, false);
 
-        // Place the camera behind the pivot.
-        // - Z is negative so the camera sits behind the player.
-        // - X sideOffset lets you experiment later with slight shoulder offsets.
-        // - Y stays 0 because the pivot itself defines the camera's vertical anchor point.
-        cameraTransform.localPosition = new Vector3(sideOffset, 0f, -cameraDistance);
+        // Place the camera behind and slightly above the pivot.
+        // The pivot itself will handle pitch/yaw behavior elsewhere.
+        cameraTransform.localPosition = new Vector3(sideOffset, verticalOffset, -cameraDistance);
 
-        // Aim the camera slightly downward.
-        // This is the simplest first-pass third-person setup.
-        cameraTransform.localRotation = Quaternion.Euler(cameraPitch, 0f, 0f);
+        // Keep the camera's local rotation neutral.
+        // The pivot's rotation should determine the final viewing angle.
+        cameraTransform.localRotation = Quaternion.identity;
 
         Debug.Log("[PlayerCameraBootstrap] Attached local camera to owning player.");
     }

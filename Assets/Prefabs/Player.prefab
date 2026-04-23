@@ -25,7 +25,7 @@ Transform:
   m_GameObject: {fileID: 7148853489544243051}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 1.6, z: 0}
+  m_LocalPosition: {x: 0, y: 0.5, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -50,6 +50,7 @@ GameObject:
   - component: {fileID: 8194632222965225880}
   - component: {fileID: 4987125017315522936}
   - component: {fileID: 6740206874064545595}
+  - component: {fileID: -9072884326607108694}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -218,7 +219,7 @@ MonoBehaviour:
   ShowTopMostFoldoutHeaderGroup: 1
   cameraPivot: {fileID: 1979638916084192685}
   cameraDistance: 4.5
-  cameraPitch: 20
+  verticalOffset: 0.2
   sideOffset: 0
   cameraFieldOfView: 65
   createCameraIfMissing: 1
@@ -237,6 +238,7 @@ MonoBehaviour:
   ShowTopMostFoldoutHeaderGroup: 1
   moveSpeed: 4.5
   rotationSpeed: 5
+  rotateTowardMovement: 0
   jumpHeight: 1.2
   gravity: -20
   groundedStickForce: -2
@@ -268,7 +270,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerInteractor
   ShowTopMostFoldoutHeaderGroup: 1
-  interactDistance: 3
+  interactDistance: 5
   interactableMask:
     serializedVersion: 2
     m_Bits: 4294967295
@@ -286,3 +288,25 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerAnchorState
   verboseLogging: 1
+--- !u!114 &-9072884326607108694
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 05a72ab8d9765cf4280182bd49328ec1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerLookController
+  ShowTopMostFoldoutHeaderGroup: 1
+  cameraPivot: {fileID: 1979638916084192685}
+  yawSensitivity: 0.12
+  pitchSensitivity: 0.1
+  minPitch: -35
+  maxPitch: 80
+  invertY: 0
+  toggleFreeCursorKey: 8
+  toggleMenuKey: 3
+  startLockedInGameplay: 1
