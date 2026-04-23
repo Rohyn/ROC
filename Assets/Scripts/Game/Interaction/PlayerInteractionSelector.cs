@@ -23,7 +23,7 @@ using Unity.Netcode;
 public class PlayerInteractionSelector : NetworkBehaviour
 {
     [Header("Required References")]
-    [Tooltip("Reference to the nearby-candidate sensor. Usually on a child trigger object.")]
+    [Tooltip("Reference to the nearby-candidate sensor on this player.")]
     [SerializeField] private PlayerInteractionSensor interactionSensor;
 
     [Tooltip("Optional explicit camera transform. If empty, Camera.main is used.")]
@@ -56,22 +56,15 @@ public class PlayerInteractionSelector : NetworkBehaviour
     private Transform _cameraTransform;
     private float _nextRescoreTime;
 
-    /// <summary>
-    /// The interactable currently considered the best candidate.
-    /// </summary>
     public GenericInteractable CurrentTarget { get; private set; }
 
-    /// <summary>
-    /// Raised whenever the current target changes.
-    /// Useful later for prompt UI.
-    /// </summary>
     public event Action<GenericInteractable> CurrentTargetChanged;
 
     private void Awake()
     {
         if (interactionSensor == null)
         {
-            interactionSensor = GetComponentInChildren<PlayerInteractionSensor>();
+            interactionSensor = GetComponent<PlayerInteractionSensor>();
         }
     }
 
@@ -123,10 +116,6 @@ public class PlayerInteractionSelector : NetworkBehaviour
         }
     }
 
-    /// <summary>
-    /// Forces an immediate refresh of the current selection.
-    /// Useful when the nearby set changes.
-    /// </summary>
     public void ForceRefresh()
     {
         RescoreCurrentTarget();
@@ -185,60 +174,60 @@ public class PlayerInteractionSelector : NetworkBehaviour
         }
     }
 
-	private float ScoreInteractable(Vector3 origin, Vector3 forward, GenericInteractable interactable)
-	{
-	    Vector3 targetPosition = interactable.transform.position;
-	    Vector3 toTarget = targetPosition - origin;
+    private float ScoreInteractable(Vector3 origin, Vector3 forward, GenericInteractable interactable)
+    {
+        Vector3 targetPosition = interactable.InteractionFocusPosition;
+        Vector3 toTarget = targetPosition - origin;
 
-	    float distance = toTarget.magnitude;
-	    if (distance <= 0.001f)
-	    {
-	        distance = 0.001f;
-	    }
+        float distance = toTarget.magnitude;
+        if (distance <= 0.001f)
+        {
+            distance = 0.001f;
+        }
 
-	    Vector3 directionToTarget = toTarget / distance;
+        Vector3 directionToTarget = toTarget / distance;
 
-	    float facingDot = Vector3.Dot(forward, directionToTarget);
-	    if (facingDot < minimumFacingDot)
-	    {
-	        return float.NegativeInfinity;
-	    }
+        float facingDot = Vector3.Dot(forward, directionToTarget);
+        if (facingDot < minimumFacingDot)
+        {
+            return float.NegativeInfinity;
+        }
 
-	    if (requireLineOfSight && !HasLineOfSight(origin, targetPosition, interactable))
-	    {
-	        return float.NegativeInfinity;
-	    }
+        if (requireLineOfSight && !HasLineOfSight(origin, targetPosition, interactable))
+        {
+            return float.NegativeInfinity;
+        }
 
-	    float score = (facingDot * 100f) - (distance * 10f);
-	    return score;
-	}
+        float score = (facingDot * 100f) - (distance * 10f);
+        return score;
+    }
 
-	private bool HasLineOfSight(Vector3 origin, Vector3 targetPosition, GenericInteractable candidate)
-	{
-	    Vector3 toTarget = targetPosition - origin;
-	    float distance = toTarget.magnitude;
+    private bool HasLineOfSight(Vector3 origin, Vector3 targetPosition, GenericInteractable candidate)
+    {
+        Vector3 toTarget = targetPosition - origin;
+        float distance = toTarget.magnitude;
 
-	    if (distance <= 0.001f)
-	    {
-	        return true;
-	    }
+        if (distance <= 0.001f)
+        {
+            return true;
+        }
 
-	    Vector3 direction = toTarget / distance;
+        Vector3 direction = toTarget / distance;
 
-	    if (Physics.Raycast(
-	        origin,
-	        direction,
-	        out RaycastHit hit,
-	        distance,
-	        lineOfSightBlockers,
-	        QueryTriggerInteraction.Ignore))
-	    {
-	        GenericInteractable hitInteractable = hit.collider.GetComponentInParent<GenericInteractable>();
-	        return hitInteractable == candidate;
-	    }
+        if (Physics.Raycast(
+            origin,
+            direction,
+            out RaycastHit hit,
+            distance,
+            lineOfSightBlockers,
+            QueryTriggerInteraction.Ignore))
+        {
+            GenericInteractable hitInteractable = hit.collider.GetComponentInParent<GenericInteractable>();
+            return hitInteractable == candidate;
+        }
 
-	    return true;
-	}
+        return true;
+    }
 
     private Vector3 GetSelectionOrigin()
     {

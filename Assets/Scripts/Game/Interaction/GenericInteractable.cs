@@ -21,22 +21,26 @@ public class GenericInteractable : MonoBehaviour
     [Tooltip("If false, this object ignores interaction requests.")]
     [SerializeField] private bool isEnabled = true;
 
-    // Cached ordered actions on this object.
+    [Tooltip("Optional point used for scoring / line-of-sight / prompt targeting. If left empty, the interactable root transform is used.")]
+    [SerializeField] private Transform interactionFocusPoint;
+
     private readonly List<InteractableAction> _actions = new();
 
     public string InteractionPrompt => interactionPrompt;
     public float InteractionRange => interactionRange;
     public bool IsEnabled => isEnabled;
 
+    /// <summary>
+    /// World-space point the interaction selector should use when evaluating this object.
+    /// </summary>
+    public Vector3 InteractionFocusPosition =>
+        interactionFocusPoint != null ? interactionFocusPoint.position : transform.position;
+
     private void Awake()
     {
         CacheActions();
     }
 
-    /// <summary>
-    /// Rebuilds and sorts the action list.
-    /// This is useful if you add/remove action components during editing.
-    /// </summary>
     private void CacheActions()
     {
         _actions.Clear();
@@ -55,9 +59,6 @@ public class GenericInteractable : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Returns true if the specified interactor is close enough and this interactable is enabled.
-    /// </summary>
     public bool CanInteract(GameObject interactorObject)
     {
         if (!isEnabled)
@@ -74,15 +75,6 @@ public class GenericInteractable : MonoBehaviour
         return distance <= interactionRange;
     }
 
-    /// <summary>
-    /// Attempts to run this interactable for the given interactor.
-    ///
-    /// For now:
-    /// - validates distance
-    /// - builds an interaction context
-    /// - executes all attached actions whose CanExecute passes
-    /// - stops early if an action sets context.StopFurtherActions
-    /// </summary>
     public bool TryInteract(GameObject interactorObject)
     {
         if (!CanInteract(interactorObject))
@@ -108,6 +100,7 @@ public class GenericInteractable : MonoBehaviour
             }
 
             Debug.Log($"[GenericInteractable] Executing action '{action.GetType().Name}' on '{name}'.");
+
             action.Execute(context);
             executedAtLeastOneAction = true;
 
