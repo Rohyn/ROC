@@ -5,33 +5,27 @@ using Unity.Netcode;
 /// <summary>
 /// Handles the owning player's interaction input.
 ///
-/// First-pass behavior:
-/// - casts forward from the current camera
-/// - finds a GenericInteractable
-/// - calls TryInteract when E is pressed
-///
-/// This is intentionally simple and local for now because your current movement
-/// and status systems are still local-owner logic.
-///
-/// Later, this is the place where you can switch to:
-/// - client request -> server RPC
-/// - server validation
-/// - UI prompts
-/// - focus highlighting
+/// This version does not perform broad search or selection itself.
+/// Instead, it relies on PlayerInteractionSelector to provide the current best target.
 /// </summary>
+[DisallowMultipleComponent]
 public class PlayerInteractor : NetworkBehaviour
 {
-    [Header("Interaction Query")]
-    [Tooltip("Maximum raycast distance for finding interactables.")]
-    [SerializeField] private float interactDistance = 3f;
+    [Header("References")]
+    [Tooltip("Reference to the interaction selector on this player. If left empty, it will be found automatically.")]
+    [SerializeField] private PlayerInteractionSelector interactionSelector;
 
-    [Tooltip("Layer mask used to limit what the interaction raycast can hit.")]
-    [SerializeField] private LayerMask interactableMask = ~0;
+    [Header("Debug")]
+    [Tooltip("If true, interaction attempts and failures will be logged.")]
+    [SerializeField] private bool verboseLogging = false;
 
-    [Tooltip("Optional explicit camera transform. If empty, Camera.main is used.")]
-    [SerializeField] private Transform cameraTransformOverride;
-
-    private Transform _cameraTransform;
+    private void Awake()
+    {
+        if (interactionSelector == null)
+        {
+            interactionSelector = GetComponent<PlayerInteractionSelector>();
+        }
+    }
 
     private void Start()
     {
@@ -40,8 +34,6 @@ public class PlayerInteractor : NetworkBehaviour
             enabled = false;
             return;
         }
-
-        CacheCamera();
     }
 
     private void Update()
@@ -49,11 +41,6 @@ public class PlayerInteractor : NetworkBehaviour
         if (!IsOwner)
         {
             return;
-        }
-
-        if (_cameraTransform == null)
-        {
-            CacheCamera();
         }
 
         Keyboard keyboard = Keyboard.current;
@@ -64,79 +51,34 @@ public class PlayerInteractor : NetworkBehaviour
 
         if (keyboard.eKey.wasPressedThisFrame)
         {
-            TryInteractForward();
+            TryInteractCurrentTarget();
         }
     }
 
-    /// <summary>
-    /// Finds the first interactable in front of the player camera and tries to use it.
-    /// </summary>
-	private void TryInteractForward()
-	{
-	    if (_cameraTransform == null)
-	    {
-	        Debug.LogWarning("[PlayerInteractor] No camera transform available for interaction query.");
-	        return;
-	    }
-
-	    // Start the interaction sweep from the player, not from the camera.
-	    // A point around lower chest / upper waist height is usually a good interaction origin.
-	    Vector3 origin = transform.position + Vector3.up * 1.0f;
-
-	    // Use the camera's facing direction, but flatten it onto the ground plane.
-	    // This makes "forward" match what the player sees without aiming sharply up/down.
-	    Vector3 direction = _cameraTransform.forward;
-	    direction.y = 0f;
-	    direction.Normalize();
-
-	    // Fallback safety in case the camera is looking almost straight up/down.
-	    if (direction.sqrMagnitude < 0.0001f)
-	    {
-	        direction = transform.forward;
-	    }
-
-	    // SphereCast is more forgiving than a thin ray for third-person interaction.
-	    if (!Physics.SphereCast(
-	            origin,
-	            0.35f,
-	            direction,
-	            out RaycastHit hit,
-	            interactDistance,
-	            interactableMask,
-	            QueryTriggerInteraction.Ignore))
-	    {
-	        Debug.Log("[PlayerInteractor] SphereCast hit nothing.");
-	        Debug.DrawRay(origin, direction * interactDistance, Color.red, 1.0f);
-	        return;
-	    }
-
-	    Debug.Log($"[PlayerInteractor] SphereCast hit '{hit.collider.name}'.");
-	    Debug.DrawRay(origin, direction * hit.distance, Color.green, 1.0f);
-
-	    GenericInteractable interactable = hit.collider.GetComponentInParent<GenericInteractable>();
-	    if (interactable == null)
-	    {
-	        Debug.Log("[PlayerInteractor] Hit collider has no GenericInteractable in parents.");
-	        return;
-	    }
-
-	    Debug.Log($"[PlayerInteractor] Found interactable '{interactable.name}'. Trying interaction.");
-
-	    bool success = interactable.TryInteract(gameObject);
-	    Debug.Log($"[PlayerInteractor] Interaction success = {success}");
-	}
-
-    private void CacheCamera()
+    private void TryInteractCurrentTarget()
     {
-        if (cameraTransformOverride != null)
+        if (interactionSelector == null)
         {
-            _cameraTransform = cameraTransformOverride;
+            Debug.LogWarning("[PlayerInteractor] No PlayerInteractionSelector assigned.");
             return;
         }
 
-        if (Camera.main != null)
+        GenericInteractable target = interactionSelector.CurrentTarget;
+        if (target == null)
         {
-            _cameraTransform = Camera.main.transform;
+            if (verboseLogging)
+            {
+                Debug.Log("[PlayerInteractor] No current interactable target.");
+            }
+
+            return;
+        }
+
+        bool success = target.TryInteract(gameObject);
+
+        if (verboseLogging)
+        {
+            Debug.Log($"[PlayerInteractor] Tried interaction with '{target.name}'. Success={success}");
         }
     }
 }

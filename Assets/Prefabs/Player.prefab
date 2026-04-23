@@ -1,5 +1,81 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
+--- !u!1 &6990495052835197777
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 8709332904880274380}
+  - component: {fileID: 8225862311605199807}
+  - component: {fileID: 2496410245348529556}
+  - component: {fileID: 36102517884525129}
+  m_Layer: 0
+  m_Name: InteractionSensor
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &8709332904880274380
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6990495052835197777}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 7238509014266976039}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!33 &8225862311605199807
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6990495052835197777}
+  m_Mesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!135 &2496410245348529556
+SphereCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6990495052835197777}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 1
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Radius: 2.5
+  m_Center: {x: 0, y: 0, z: 0}
+--- !u!114 &36102517884525129
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6990495052835197777}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c706bf99be6c740448c04be8f35e0481, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerInteractionSensor
+  verboseLogging: 0
 --- !u!1 &7148853489544243051
 GameObject:
   m_ObjectHideFlags: 0
@@ -51,6 +127,7 @@ GameObject:
   - component: {fileID: 4987125017315522936}
   - component: {fileID: 6740206874064545595}
   - component: {fileID: -9072884326607108694}
+  - component: {fileID: 2635858095395341967}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -72,6 +149,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1979638916084192685}
+  - {fileID: 8709332904880274380}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!33 &981331502509993411
@@ -191,7 +269,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
-  GlobalObjectIdHash: 3760772638
+  GlobalObjectIdHash: 2132210247
   InScenePlacedSourceGlobalObjectIdHash: 0
   DeferredDespawnTick: 0
   Ownership: 1
@@ -270,11 +348,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerInteractor
   ShowTopMostFoldoutHeaderGroup: 1
-  interactDistance: 5
-  interactableMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  cameraTransformOverride: {fileID: 0}
+  interactionSelector: {fileID: 0}
+  verboseLogging: 0
 --- !u!114 &6740206874064545595
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -310,3 +385,26 @@ MonoBehaviour:
   toggleFreeCursorKey: 8
   toggleMenuKey: 3
   startLockedInGameplay: 1
+--- !u!114 &2635858095395341967
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 67ee3e50a03f6434285d4d3a8d0b4c9b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerInteractionSelector
+  ShowTopMostFoldoutHeaderGroup: 1
+  interactionSensor: {fileID: 36102517884525129}
+  cameraTransformOverride: {fileID: 0}
+  rescoreIntervalSeconds: 0.08
+  selectionOriginHeight: 1
+  minimumFacingDot: 0
+  requireLineOfSight: 1
+  lineOfSightBlockers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  verboseLogging: 0
