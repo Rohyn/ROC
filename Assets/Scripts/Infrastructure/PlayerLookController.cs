@@ -49,7 +49,16 @@ public class PlayerLookController : NetworkBehaviour
         /// - intended for inventory / map / journal / menu tabs later
         /// - does NOT auto-close on movement in this first version
         /// </summary>
-        MenuCursor = 2
+        MenuCursor = 2,
+
+        /// <summary>
+        /// Conversation mode:
+        /// - cursor unlocked
+        /// - mouse does NOT move camera
+        /// - menu should remain closed
+        /// - used while speaking with an NPC
+        /// </summary>
+        ConversationCursor = 3
     }
 
     [Header("Required References")]
@@ -154,12 +163,18 @@ public class PlayerLookController : NetworkBehaviour
     }
 
     /// <summary>
-    /// Processes the two cursor-mode toggle keys.
+    /// Processes the three cursor-mode toggle keys.
     /// </summary>
     private void HandleModeToggleInput(Keyboard keyboard)
     {
+        // During conversation, do not allow '.' or Tab to change cursor mode.
+        // Conversation open/close should be controlled by the conversation system.
+        if (CurrentCursorMode == CursorModeState.ConversationCursor)
+        {
+            return;
+        }
+
         // '.' toggles the temporary free-cursor mode.
-        // Do NOT let this override the full menu mode.
         if (keyboard[toggleFreeCursorKey].wasPressedThisFrame)
         {
             if (CurrentCursorMode == CursorModeState.MenuCursor)
@@ -179,7 +194,7 @@ public class PlayerLookController : NetworkBehaviour
             return;
         }
 
-        // Tab toggles the general menu mode.
+        // Tab toggles the menu mode.
         if (keyboard[toggleMenuKey].wasPressedThisFrame)
         {
             if (CurrentCursorMode == CursorModeState.MenuCursor)
@@ -277,6 +292,13 @@ public class PlayerLookController : NetworkBehaviour
             }
 
             case CursorModeState.MenuCursor:
+            {
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+                break;
+            }
+
+            case CursorModeState.ConversationCursor:
             {
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;

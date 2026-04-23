@@ -55,6 +55,8 @@ GameObject:
   - component: {fileID: 2750283144078216995}
   - component: {fileID: 5149886264844771532}
   - component: {fileID: -5665974493355275435}
+  - component: {fileID: -720844528735070886}
+  - component: {fileID: 5590071248939819745}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -418,4 +420,32 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::ROC.Inventory.PlayerInventory
   ShowTopMostFoldoutHeaderGroup: 1
   itemCatalog: {fileID: 11400000, guid: d3bd25332bcfd8c408aafe8c5e3ac69c, type: 2}
+  verboseLogging: 1
+--- !u!114 &-720844528735070886
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8908d62556cbd254997146c67e288c65, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerProgressState
+  ShowTopMostFoldoutHeaderGroup: 1
+  verboseLogging: 1
+--- !u!114 &5590071248939819745
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9b1230a16cde61b41bba4392b22b8629, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerConversationState
+  ShowTopMostFoldoutHeaderGroup: 1
   verboseLogging: 1

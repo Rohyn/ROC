@@ -8,21 +8,15 @@ using Unity.Netcode;
 /// This script does NOT hardcode any specific behavior like "rest" or "rotate".
 /// Instead, it discovers attached InteractableAction components and executes them.
 ///
-/// This version supports interaction consumption scope:
-/// - None
-/// - PerPlayer
-/// - Global
+/// This version supports:
+/// - interaction consumption scope
+/// - optional target collider for wide/low objects
+/// - ANY NUMBER of interaction focus points
 ///
 /// IMPORTANT:
-/// This is about AVAILABILITY after a successful interaction, not effect audience.
-/// Future "buff all players in scene/range" behavior should be modeled at the action level,
-/// not here.
-///
-/// IMPORTANT IMPLEMENTATION NOTE:
-/// For in-scene placed NetworkObjects, NGO NetworkHide only despawns the NetworkObject on the client;
-/// it does not destroy the underlying scene GameObject.
-/// Because of that, this class explicitly manages local presentation/interactivity
-/// when an interactable becomes consumed.
+/// - interactionTargetCollider is still the best choice for distance/range checks
+/// - interactionFocusPoints are used for facing checks, LOS, and prompt placement
+/// - when multiple focus points exist, the nearest one to the querying origin is used
 /// </summary>
 [RequireComponent(typeof(NetworkObject))]
 public class GenericInteractable : NetworkBehaviour
@@ -33,8 +27,12 @@ public class GenericInteractable : NetworkBehaviour
     [SerializeField] private bool isEnabled = true;
 
     [Header("Selection / Targeting")]
-    [SerializeField] private Transform interactionFocusPoint;
+    [Tooltip("Optional focus points used for facing checks, LOS, and prompt placement. The nearest valid one is chosen at runtime.")]
+    [SerializeField] private Transform[] interactionFocusPoints;
+
+    [Tooltip("Optional collider used as the selection target volume. When assigned, range/distance checks use ClosestPoint on this collider.")]
     [SerializeField] private Collider interactionTargetCollider;
+
     [SerializeField] private float selectionPriorityBonus = 0f;
 
     [Header("Consumption")]
@@ -53,33 +51,13 @@ public class GenericInteractable : NetworkBehaviour
     private readonly List<InteractableAction> _actions = new();
     private readonly List<InteractableAvailabilityRules> _availabilityRules = new();
 
-    // ---------------------------------------------------------------------
-    // Replicated consumption state
-    // ---------------------------------------------------------------------
-
-    /// <summary>
-    /// True when the object is globally consumed for everyone.
-    /// </summary>
     private readonly NetworkVariable<bool> _globallyConsumed =
         new NetworkVariable<bool>(false);
 
-    /// <summary>
-    /// Client IDs for which this interactable has been consumed.
-    /// This is the first-pass per-player consumed state.
-    /// </summary>
     private readonly NetworkList<ulong> _consumedByClientIds = new();
-
-    // ---------------------------------------------------------------------
-    // Local cached presentation state
-    // ---------------------------------------------------------------------
 
     private Renderer[] _cachedRenderers;
     private Collider[] _cachedColliders;
-
-    /// <summary>
-    /// Local cached value indicating whether this interactable should be considered consumed
-    /// for THIS client.
-    /// </summary>
     private bool _locallyConsumedForThisClient;
 
     public string InteractionPrompt => interactionPrompt;
@@ -88,8 +66,12 @@ public class GenericInteractable : NetworkBehaviour
     public float SelectionPriorityBonus => selectionPriorityBonus;
     public Collider InteractionTargetCollider => interactionTargetCollider;
 
-    public Vector3 InteractionFocusPosition =>
-        interactionFocusPoint != null ? interactionFocusPoint.position : transform.position;
+    /// <summary>
+    /// Backward-compatible convenience property.
+    /// Uses the nearest focus point to this object's root position.
+    /// This is mainly a fallback; callers should prefer GetBestInteractionFocusPosition(referencePosition).
+    /// </summary>
+    public Vector3 InteractionFocusPosition => GetBestInteractionFocusPosition(transform.position);
 
     private void Awake()
     {
@@ -122,17 +104,18 @@ public class GenericInteractable : NetworkBehaviour
         _actions.Sort((a, b) => a.ExecutionOrder.CompareTo(b.ExecutionOrder));
     }
 
-    private void CachePresentationComponents()
-    {
-        _cachedRenderers = GetComponentsInChildren<Renderer>(true);
-        _cachedColliders = GetComponentsInChildren<Collider>(true);
-    }
     private void CacheAvailabilityRules()
     {
         _availabilityRules.Clear();
 
         InteractableAvailabilityRules[] rules = GetComponents<InteractableAvailabilityRules>();
         _availabilityRules.AddRange(rules);
+    }
+
+    private void CachePresentationComponents()
+    {
+        _cachedRenderers = GetComponentsInChildren<Renderer>(true);
+        _cachedColliders = GetComponentsInChildren<Collider>(true);
     }
 
     private void OnValidate()
@@ -143,6 +126,14 @@ public class GenericInteractable : NetworkBehaviour
         }
     }
 
+    /// <summary>
+    /// Returns the best point on or for this interactable to evaluate range/distance against.
+    ///
+    /// Priority:
+    /// 1. ClosestPoint on the configured target collider
+    /// 2. Best interaction focus point relative to origin
+    /// 3. Interactable root transform position
+    /// </summary>
     public Vector3 GetInteractionEvaluationPoint(Vector3 origin)
     {
         if (interactionTargetCollider != null)
@@ -150,7 +141,43 @@ public class GenericInteractable : NetworkBehaviour
             return interactionTargetCollider.ClosestPoint(origin);
         }
 
-        return InteractionFocusPosition;
+        return GetBestInteractionFocusPosition(origin);
+    }
+
+    /// <summary>
+    /// Returns the nearest valid interaction focus point relative to the provided reference position.
+    ///
+    /// If no focus points are assigned, falls back to the interactable root transform position.
+    /// </summary>
+    public Vector3 GetBestInteractionFocusPosition(Vector3 referencePosition)
+    {
+        if (interactionFocusPoints == null || interactionFocusPoints.Length == 0)
+        {
+            return transform.position;
+        }
+
+        bool foundAny = false;
+        float bestSqrDistance = float.PositiveInfinity;
+        Vector3 bestPosition = transform.position;
+
+        for (int i = 0; i < interactionFocusPoints.Length; i++)
+        {
+            Transform focus = interactionFocusPoints[i];
+            if (focus == null)
+            {
+                continue;
+            }
+
+            float sqrDistance = (focus.position - referencePosition).sqrMagnitude;
+            if (!foundAny || sqrDistance < bestSqrDistance)
+            {
+                foundAny = true;
+                bestSqrDistance = sqrDistance;
+                bestPosition = focus.position;
+            }
+        }
+
+        return foundAny ? bestPosition : transform.position;
     }
 
     public bool CanInteract(GameObject interactorObject)
@@ -164,10 +191,6 @@ public class GenericInteractable : NetworkBehaviour
         {
             return false;
         }
-
-        // -------------------------------------------------------------
-        // Consumption checks
-        // -------------------------------------------------------------
 
         if (_globallyConsumed.Value)
         {
@@ -188,7 +211,6 @@ public class GenericInteractable : NetworkBehaviour
             }
         }
 
-        // Also respect this client's local consumed state so prompt/selection shut off immediately.
         if (!IsServer && _locallyConsumedForThisClient)
         {
             return false;
@@ -210,9 +232,6 @@ public class GenericInteractable : NetworkBehaviour
             }
         }
 
-        // -------------------------------------------------------------
-        // Range check
-        // -------------------------------------------------------------
         Vector3 interactorPosition = interactorObject.transform.position;
         Vector3 evaluationPoint = GetInteractionEvaluationPoint(interactorPosition);
 
@@ -297,7 +316,6 @@ public class GenericInteractable : NetworkBehaviour
 
     private void MarkConsumedForClient(ulong clientId)
     {
-        // Prevent duplicates.
         for (int i = 0; i < _consumedByClientIds.Count; i++)
         {
             if (_consumedByClientIds[i] == clientId)
@@ -313,7 +331,6 @@ public class GenericInteractable : NetworkBehaviour
             Debug.Log($"[GenericInteractable] Marked '{name}' consumed for client {clientId}.", this);
         }
 
-        // If this is also the host's local client, refresh immediately on host side.
         RefreshLocalConsumedStateAndPresentation();
     }
 
@@ -344,9 +361,6 @@ public class GenericInteractable : NetworkBehaviour
         RefreshLocalConsumedStateAndPresentation();
     }
 
-    /// <summary>
-    /// Recomputes whether this interactable is consumed for the local client and updates local visuals/colliders.
-    /// </summary>
     private void RefreshLocalConsumedStateAndPresentation()
     {
         bool isConsumedForLocalClient = _globallyConsumed.Value;
@@ -373,10 +387,6 @@ public class GenericInteractable : NetworkBehaviour
         }
     }
 
-    /// <summary>
-    /// Enables or disables local renderers/colliders so consumed pickups actually disappear
-    /// and stop being targetable on the local client.
-    /// </summary>
     private void ApplyLocalPresentationState(bool visibleAndInteractive)
     {
         if (_cachedRenderers == null || _cachedColliders == null)
@@ -408,7 +418,6 @@ public class GenericInteractable : NetworkBehaviour
                     continue;
                 }
 
-                // Do not disable the NetworkObject itself; just the colliders.
                 colliderComponent.enabled = visibleAndInteractive;
             }
         }

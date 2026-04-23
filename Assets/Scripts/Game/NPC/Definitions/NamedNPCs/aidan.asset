@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ee40e865f64c4914cb727749d6e73c53, type: 3}
+  m_Name: aidan
+  m_EditorClassIdentifier: Assembly-CSharp::NamedNPCDefinition
+  npcId: npc.aidan
+  displayName: Aidan
+  origin: 1
+  currentLocation: 1
+  role: 1
+  personality:
+    activity: -0.2
+    suspicion: -0.5
+    bravery: 0.2
+    formality: 0.2
+    knowledge: 0.8

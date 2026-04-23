@@ -133,23 +133,47 @@ public class InteractableRotationState : NetworkBehaviour
 
     private void Update()
     {
-        // Dedicated server does not need to animate local visuals.
+        if (rotatingTransform == null || !IsSpawned)
+        {
+            return;
+        }
+
+        // -------------------------------------------------------------
+        // GLOBAL ROTATION
+        // -------------------------------------------------------------
+        // Rotate on every instance, INCLUDING dedicated server.
+        // This is required so server-side colliders move correctly for
+        // authoritative movement / collision.
+        if (rotationScope == RotationScope.Global)
+        {
+            bool shouldBeOpen = _globalIsOpen.Value;
+            Quaternion targetRotation = shouldBeOpen ? _openLocalRotation : _closedLocalRotation;
+
+            rotatingTransform.localRotation = Quaternion.RotateTowards(
+                rotatingTransform.localRotation,
+                targetRotation,
+                rotationSpeedDegreesPerSecond * Time.deltaTime);
+
+            return;
+        }
+
+        // -------------------------------------------------------------
+        // PER-PLAYER ROTATION
+        // -------------------------------------------------------------
+        // Only clients/host should animate per-player local visual state.
+        // Dedicated server should NOT try to choose one client's per-player
+        // visual rotation as the authoritative collider state.
         if (!IsClient && !IsHost)
         {
             return;
         }
 
-        if (rotatingTransform == null)
-        {
-            return;
-        }
-
-        bool shouldBeOpen = GetDesiredOpenStateForLocalClient();
-        Quaternion targetRotation = shouldBeOpen ? _openLocalRotation : _closedLocalRotation;
+        bool shouldBeOpenForLocalClient = GetDesiredOpenStateForLocalClient();
+        Quaternion perPlayerTargetRotation = shouldBeOpenForLocalClient ? _openLocalRotation : _closedLocalRotation;
 
         rotatingTransform.localRotation = Quaternion.RotateTowards(
             rotatingTransform.localRotation,
-            targetRotation,
+            perPlayerTargetRotation,
             rotationSpeedDegreesPerSecond * Time.deltaTime);
     }
 

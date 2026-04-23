@@ -1,0 +1,41 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 82b4a221e677d6e41a6347a821f0e786, type: 3}
+  m_Name: aidan
+  m_EditorClassIdentifier: Assembly-CSharp::NPCConversationProfile
+  openingGreeting: Hello.
+  fallbackResponse: I do not have much to say about that.
+  rootTopics:
+  - {fileID: 11400000, guid: 0da18b29b47bac042aeee97f84cec6d8, type: 2}
+  - {fileID: 11400000, guid: 94031978e292cb74d97cf637e728c39b, type: 2}
+  entries:
+  - entryId: 0
+    topic: {fileID: 11400000, guid: 0da18b29b47bac042aeee97f84cec6d8, type: 2}
+    responseText: My name is Aidan. I am a healer here at the Dragon Keep - one of
+      the best, I might add.
+    priority: 0
+    conditions:
+      requiredProgressFlags: []
+      blockedProgressFlags: []
+      requiredBagItems: []
+      requiredEquippedItems: []
+    followUpTopics: []
+  - entryId: 1
+    topic: {fileID: 11400000, guid: 94031978e292cb74d97cf637e728c39b, type: 2}
+    responseText: This is my infirmary in the Dragon Keep. Don't you remember?
+    priority: 0
+    conditions:
+      requiredProgressFlags: []
+      blockedProgressFlags: []
+      requiredBagItems: []
+      requiredEquippedItems: []
+    followUpTopics: []

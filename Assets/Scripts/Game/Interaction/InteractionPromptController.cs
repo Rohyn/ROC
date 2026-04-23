@@ -206,7 +206,11 @@ public class InteractionPromptController : MonoBehaviour
 	        return;
 	    }
 
-	    Vector3 worldPosition = _currentTarget.InteractionFocusPosition + worldOffset;
+	    Vector3 referencePosition = _boundSelector != null
+            ? _boundSelector.transform.position
+            : worldCamera.transform.position;
+
+        Vector3 worldPosition = _currentTarget.GetBestInteractionFocusPosition(referencePosition) + worldOffset;
 	    Vector3 screenPosition = worldCamera.WorldToScreenPoint(worldPosition);
 
 	    // If the point is behind the camera, hide the prompt.
