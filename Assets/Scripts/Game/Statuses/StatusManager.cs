@@ -1,86 +1,127 @@
 using System;
 using System.Collections.Generic;
+using Unity.Collections;
+using Unity.Netcode;
 using UnityEngine;
 
 namespace ROC.Statuses
 {
     /// <summary>
-    /// Holds and manages all active runtime statuses on an entity.
+    /// Server-authoritative status manager.
     ///
-    /// RESPONSIBILITIES:
-    /// - add statuses
-    /// - remove statuses
-    /// - tick timed statuses
-    /// - answer aggregate questions like:
-    ///   - "Does this player have NoMovement?"
-    ///   - "What is the move speed multiplier?"
-    /// - apply authored transformation rules such as Chill -> Frozen
+    /// DESIGN:
+    /// - The server owns the authoritative mutable status instances.
+    /// - Clients receive a read-only replicated snapshot list via NetworkList.
+    /// - Clients resolve snapshot StatusIds through a shared StatusCatalog.
     ///
-    /// IMPORTANT:
-    /// This first version is local/runtime only.
-    /// It is NOT yet replicated across the network.
-    /// That is okay for now because the goal is to validate structure and behavior.
+    /// THIS VERSION SUPPORTS:
+    /// - server-authoritative apply / remove
+    /// - timed expiry on the server
+    /// - replicated active statuses for clients
+    /// - client-side flag/modifier queries based on the replicated view
+    ///
+    /// THIS VERSION DOES NOT YET DO:
+    /// - periodic damage/heal execution
+    /// - special source metadata replication
+    /// - prediction / rollback
     /// </summary>
     [DisallowMultipleComponent]
-    public class StatusManager : MonoBehaviour
+    [RequireComponent(typeof(NetworkObject))]
+    public class StatusManager : NetworkBehaviour
     {
+        [Header("References")]
+        [Tooltip("Catalog used to resolve replicated status IDs back into local StatusDefinition assets.")]
+        [SerializeField] private StatusCatalog statusCatalog;
+
         [Header("Debug")]
-        [Tooltip("If true, status applications/removals and other important events will be logged.")]
+        [Tooltip("If true, status applications/removals and sync events will be logged.")]
         [SerializeField] private bool verboseLogging = true;
 
         /// <summary>
-        /// Current active runtime statuses on this entity.
+        /// Server-only authoritative runtime status instances.
         /// </summary>
-        private readonly List<StatusInstance> _activeStatuses = new();
+        private readonly List<StatusInstance> _authoritativeStatuses = new();
 
         /// <summary>
-        /// Cached aggregate flags built from all active statuses.
-        /// This is useful because flags are checked often.
+        /// Replicated read-only status view shared with clients.
+        /// </summary>
+        private readonly NetworkList<ReplicatedStatusState> _replicatedStatuses = new();
+
+        /// <summary>
+        /// Cached aggregate flags built from the current local view of statuses.
+        /// On server: derived from authoritative statuses.
+        /// On clients: derived from replicated statuses.
         /// </summary>
         private StatusFlags _combinedFlags = StatusFlags.None;
 
         /// <summary>
-        /// Fired whenever the active status set changes in a meaningful way.
-        /// UI or other systems can subscribe later.
+        /// Fired whenever the local visible status state changes.
+        /// This fires on server when authoritative state changes and on clients when replicated state changes.
         /// </summary>
         public event Action StatusesChanged;
 
-        /// <summary>
-        /// Public read-only access to current combined flags.
-        /// </summary>
         public StatusFlags CombinedFlags => _combinedFlags;
 
         /// <summary>
-        /// Public read-only access to the current active statuses.
+        /// Server-only authoritative list exposure.
+        /// Useful for debugging, but not meaningful on pure clients.
         /// </summary>
-        public IReadOnlyList<StatusInstance> ActiveStatuses => _activeStatuses;
+        public IReadOnlyList<StatusInstance> ActiveStatuses => _authoritativeStatuses;
+
+        public override void OnNetworkSpawn()
+        {
+            if (!IsServer)
+            {
+                _replicatedStatuses.OnListChanged += HandleReplicatedStatusesChanged;
+                RebuildDerivedStateFromReplicated();
+                RaiseStatusesChanged();
+            }
+            else
+            {
+                RebuildDerivedStateFromAuthoritative();
+                PublishReplicatedStatuses();
+                RaiseStatusesChanged();
+            }
+        }
+
+        public override void OnNetworkDespawn()
+        {
+            if (!IsServer)
+            {
+                _replicatedStatuses.OnListChanged -= HandleReplicatedStatusesChanged;
+            }
+        }
 
         private void Update()
         {
+            if (!IsServer)
+            {
+                return;
+            }
+
             TickStatuses(Time.deltaTime);
         }
 
         /// <summary>
-        /// Applies a status to this entity.
-        ///
-        /// This method obeys the authored stacking rules on the definition:
-        /// - Unique
-        /// - RefreshDuration
-        /// - AddStacks
-        /// - Replace
+        /// Applies a status on the authoritative server only.
         ///
         /// Returns true if the status state changed.
         /// </summary>
         public bool ApplyStatus(StatusDefinition definition, int initialStacks = 1, float durationOverrideSeconds = -1f)
         {
-            if (definition == null)
+            if (!IsServer)
             {
-                Debug.LogError("[StatusManager] Cannot apply a null StatusDefinition.");
+                Debug.LogWarning("[StatusManager] ApplyStatus was called on a non-server instance.", this);
                 return false;
             }
 
-            StatusInstance existing = FindInstance(definition);
+            if (definition == null)
+            {
+                Debug.LogError("[StatusManager] Cannot apply a null StatusDefinition.", this);
+                return false;
+            }
 
+            StatusInstance existing = FindAuthoritativeInstance(definition);
             float appliedDuration = CalculateAppliedDuration(definition, durationOverrideSeconds);
             int clampedStacks = Mathf.Clamp(initialStacks, 1, Mathf.Max(1, definition.MaxStacks));
 
@@ -99,7 +140,7 @@ namespace ROC.Statuses
                     }
 
                     StatusInstance created = new StatusInstance(definition, clampedStacks, appliedDuration);
-                    _activeStatuses.Add(created);
+                    _authoritativeStatuses.Add(created);
 
                     if (verboseLogging)
                     {
@@ -107,8 +148,7 @@ namespace ROC.Statuses
                     }
 
                     HandleTransformIfNeeded(created);
-                    RebuildDerivedState();
-                    RaiseStatusesChanged();
+                    CommitAuthoritativeChanges();
                     return true;
                 }
 
@@ -126,13 +166,12 @@ namespace ROC.Statuses
                             Debug.Log($"[StatusManager] Refreshed duration of status '{definition.DisplayName}'.", this);
                         }
 
-                        RebuildDerivedState();
-                        RaiseStatusesChanged();
+                        CommitAuthoritativeChanges();
                         return true;
                     }
 
                     StatusInstance created = new StatusInstance(definition, clampedStacks, appliedDuration);
-                    _activeStatuses.Add(created);
+                    _authoritativeStatuses.Add(created);
 
                     if (verboseLogging)
                     {
@@ -140,8 +179,7 @@ namespace ROC.Statuses
                     }
 
                     HandleTransformIfNeeded(created);
-                    RebuildDerivedState();
-                    RaiseStatusesChanged();
+                    CommitAuthoritativeChanges();
                     return true;
                 }
 
@@ -151,8 +189,6 @@ namespace ROC.Statuses
                     {
                         existing.AddStacks(clampedStacks, definition.MaxStacks);
 
-                        // Common MMO behavior:
-                        // when a timed stacked status is re-applied, its duration is refreshed.
                         if (definition.DurationType == StatusDurationType.Timed)
                         {
                             existing.RefreshDuration(appliedDuration);
@@ -164,13 +200,12 @@ namespace ROC.Statuses
                         }
 
                         HandleTransformIfNeeded(existing);
-                        RebuildDerivedState();
-                        RaiseStatusesChanged();
+                        CommitAuthoritativeChanges();
                         return true;
                     }
 
                     StatusInstance created = new StatusInstance(definition, clampedStacks, appliedDuration);
-                    _activeStatuses.Add(created);
+                    _authoritativeStatuses.Add(created);
 
                     if (verboseLogging)
                     {
@@ -178,8 +213,7 @@ namespace ROC.Statuses
                     }
 
                     HandleTransformIfNeeded(created);
-                    RebuildDerivedState();
-                    RaiseStatusesChanged();
+                    CommitAuthoritativeChanges();
                     return true;
                 }
 
@@ -187,11 +221,11 @@ namespace ROC.Statuses
                 {
                     if (existing != null)
                     {
-                        _activeStatuses.Remove(existing);
+                        _authoritativeStatuses.Remove(existing);
                     }
 
                     StatusInstance created = new StatusInstance(definition, clampedStacks, appliedDuration);
-                    _activeStatuses.Add(created);
+                    _authoritativeStatuses.Add(created);
 
                     if (verboseLogging)
                     {
@@ -199,8 +233,7 @@ namespace ROC.Statuses
                     }
 
                     HandleTransformIfNeeded(created);
-                    RebuildDerivedState();
-                    RaiseStatusesChanged();
+                    CommitAuthoritativeChanges();
                     return true;
                 }
 
@@ -211,159 +244,154 @@ namespace ROC.Statuses
         }
 
         /// <summary>
-        /// Removes the first matching instance of a status definition.
+        /// Removes a status on the authoritative server only.
         /// Returns true if something was removed.
         /// </summary>
         public bool RemoveStatus(StatusDefinition definition)
         {
+            if (!IsServer)
+            {
+                Debug.LogWarning("[StatusManager] RemoveStatus was called on a non-server instance.", this);
+                return false;
+            }
+
             if (definition == null)
             {
                 return false;
             }
 
-            StatusInstance existing = FindInstance(definition);
+            StatusInstance existing = FindAuthoritativeInstance(definition);
             if (existing == null)
             {
                 return false;
             }
 
-            _activeStatuses.Remove(existing);
+            _authoritativeStatuses.Remove(existing);
 
             if (verboseLogging)
             {
                 Debug.Log($"[StatusManager] Removed status '{definition.DisplayName}'.", this);
             }
 
-            RebuildDerivedState();
-            RaiseStatusesChanged();
+            CommitAuthoritativeChanges();
             return true;
         }
 
         /// <summary>
-        /// Returns true if this entity currently has the specified status definition active.
+        /// Returns true if this entity currently has the specified status.
+        /// On server: authoritative view.
+        /// On clients: replicated view.
         /// </summary>
         public bool HasStatus(StatusDefinition definition)
         {
-            return FindInstance(definition) != null;
+            if (definition == null)
+            {
+                return false;
+            }
+
+            if (IsServer)
+            {
+                return FindAuthoritativeInstance(definition) != null;
+            }
+
+            FixedString64Bytes statusId = new FixedString64Bytes(definition.StatusId);
+            for (int i = 0; i < _replicatedStatuses.Count; i++)
+            {
+                if (_replicatedStatuses[i].StatusId.Equals(statusId))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
-        /// <summary>
-        /// Returns true if the aggregate status state contains the requested flag.
-        ///
-        /// Example:
-        /// - HasFlag(StatusFlags.NoMovement)
-        /// - HasFlag(StatusFlags.NoActions)
-        /// </summary>
         public bool HasFlag(StatusFlags flag)
         {
             return (_combinedFlags & flag) == flag;
         }
 
-        /// <summary>
-        /// Returns the total multiplicative modifier for the requested modifier type.
-        ///
-        /// Example:
-        /// - if two statuses contribute MoveSpeed x 0.9 and MoveSpeed x 0.8,
-        ///   this returns 0.72.
-        ///
-        /// Default return value is 1.0, meaning "no change".
-        /// </summary>
         public float GetMultiplicativeModifier(StatusModifierType modifierType)
         {
-            float result = 1f;
-
-            for (int i = 0; i < _activeStatuses.Count; i++)
+            if (IsServer)
             {
-                StatusInstance instance = _activeStatuses[i];
-                if (instance?.Definition == null)
-                {
-                    continue;
-                }
-
-                StatusModifierDefinition[] modifiers = instance.Definition.Modifiers;
-                if (modifiers == null)
-                {
-                    continue;
-                }
-
-                for (int j = 0; j < modifiers.Length; j++)
-                {
-                    StatusModifierDefinition modifier = modifiers[j];
-
-                    if (modifier.modifierType != modifierType)
-                    {
-                        continue;
-                    }
-
-                    if (modifier.operation == StatusModifierOperation.Multiply)
-                    {
-                        result *= modifier.value;
-                    }
-                }
+                return GetMultiplicativeModifierFromAuthoritative(modifierType);
             }
 
-            return result;
+            return GetMultiplicativeModifierFromReplicated(modifierType);
         }
 
-        /// <summary>
-        /// Returns the total additive modifier for the requested modifier type.
-        ///
-        /// Default return value is 0.0, meaning "no change".
-        /// </summary>
         public float GetAdditiveModifier(StatusModifierType modifierType)
         {
-            float result = 0f;
-
-            for (int i = 0; i < _activeStatuses.Count; i++)
+            if (IsServer)
             {
-                StatusInstance instance = _activeStatuses[i];
-                if (instance?.Definition == null)
-                {
-                    continue;
-                }
-
-                StatusModifierDefinition[] modifiers = instance.Definition.Modifiers;
-                if (modifiers == null)
-                {
-                    continue;
-                }
-
-                for (int j = 0; j < modifiers.Length; j++)
-                {
-                    StatusModifierDefinition modifier = modifiers[j];
-
-                    if (modifier.modifierType != modifierType)
-                    {
-                        continue;
-                    }
-
-                    if (modifier.operation == StatusModifierOperation.Add)
-                    {
-                        result += modifier.value;
-                    }
-                }
+                return GetAdditiveModifierFromAuthoritative(modifierType);
             }
 
-            return result;
+            return GetAdditiveModifierFromReplicated(modifierType);
         }
 
         /// <summary>
-        /// Ticks all timed statuses and removes any that expire.
+        /// Returns the remaining duration for a status as seen locally.
+        /// This is primarily useful for UI later.
         ///
-        /// IMPORTANT:
-        /// This first version does NOT yet execute periodic damage/heal effects.
-        /// It only handles timed expiration.
+        /// Returns:
+        /// - 0 for missing status
+        /// - 0 for non-timed statuses
+        /// - remaining seconds for timed statuses
         /// </summary>
+        public float GetRemainingDurationSeconds(StatusDefinition definition)
+        {
+            if (definition == null)
+            {
+                return 0f;
+            }
+
+            if (IsServer)
+            {
+                StatusInstance instance = FindAuthoritativeInstance(definition);
+                if (instance == null)
+                {
+                    return 0f;
+                }
+
+                return instance.Definition.DurationType == StatusDurationType.Timed
+                    ? Mathf.Max(0f, instance.RemainingDurationSeconds)
+                    : 0f;
+            }
+
+            FixedString64Bytes statusId = new FixedString64Bytes(definition.StatusId);
+
+            for (int i = 0; i < _replicatedStatuses.Count; i++)
+            {
+                ReplicatedStatusState state = _replicatedStatuses[i];
+                if (!state.StatusId.Equals(statusId))
+                {
+                    continue;
+                }
+
+                if (state.ExpireAtServerTimeSeconds <= 0d || NetworkManager == null)
+                {
+                    return 0f;
+                }
+
+                double remaining = state.ExpireAtServerTimeSeconds - NetworkManager.ServerTime.Time;
+                return remaining > 0d ? (float)remaining : 0f;
+            }
+
+            return 0f;
+        }
+
         private void TickStatuses(float deltaTime)
         {
             bool changed = false;
 
-            for (int i = _activeStatuses.Count - 1; i >= 0; i--)
+            for (int i = _authoritativeStatuses.Count - 1; i >= 0; i--)
             {
-                StatusInstance instance = _activeStatuses[i];
+                StatusInstance instance = _authoritativeStatuses[i];
                 if (instance == null)
                 {
-                    _activeStatuses.RemoveAt(i);
+                    _authoritativeStatuses.RemoveAt(i);
                     changed = true;
                     continue;
                 }
@@ -379,26 +407,16 @@ namespace ROC.Statuses
                     Debug.Log($"[StatusManager] Timed status '{instance.Definition.DisplayName}' expired.", this);
                 }
 
-                _activeStatuses.RemoveAt(i);
+                _authoritativeStatuses.RemoveAt(i);
                 changed = true;
             }
 
             if (changed)
             {
-                RebuildDerivedState();
-                RaiseStatusesChanged();
+                CommitAuthoritativeChanges();
             }
         }
 
-        /// <summary>
-        /// Handles transformation rules like Chill -> Frozen when a stack threshold is reached.
-        ///
-        /// This is intentionally simple:
-        /// - if the rule is enabled
-        /// - if required stacks are reached
-        /// - if a target status exists
-        /// then apply the target status and optionally remove the source.
-        /// </summary>
         private void HandleTransformIfNeeded(StatusInstance instance)
         {
             if (instance == null || instance.Definition == null)
@@ -437,28 +455,62 @@ namespace ROC.Statuses
 
             if (rule.removeSourceStatus)
             {
-                _activeStatuses.Remove(instance);
+                _authoritativeStatuses.Remove(instance);
             }
 
-            // Apply the target status.
-            // This intentionally goes through ApplyStatus so the target's own stacking rules
-            // and duration rules are respected.
             ApplyStatus(rule.targetStatus, rule.targetStartingStacks);
         }
 
-        /// <summary>
-        /// Rebuilds cached aggregate state derived from the active status list.
-        ///
-        /// Right now, this only caches flags because flags are checked often and are cheap to cache.
-        /// Numeric modifiers are still queried by scanning the active list.
-        /// </summary>
-        private void RebuildDerivedState()
+        private void CommitAuthoritativeChanges()
+        {
+            RebuildDerivedStateFromAuthoritative();
+            PublishReplicatedStatuses();
+            RaiseStatusesChanged();
+        }
+
+        private void PublishReplicatedStatuses()
+        {
+            _replicatedStatuses.Clear();
+
+            double serverTime = NetworkManager != null ? NetworkManager.ServerTime.Time : 0d;
+
+            for (int i = 0; i < _authoritativeStatuses.Count; i++)
+            {
+                StatusInstance instance = _authoritativeStatuses[i];
+                if (instance == null || instance.Definition == null)
+                {
+                    continue;
+                }
+
+                double expireAtServerTimeSeconds = 0d;
+
+                if (instance.Definition.DurationType == StatusDurationType.Timed)
+                {
+                    expireAtServerTimeSeconds = serverTime + Mathf.Max(0f, instance.RemainingDurationSeconds);
+                }
+
+                _replicatedStatuses.Add(new ReplicatedStatusState
+                {
+                    StatusId = new FixedString64Bytes(instance.Definition.StatusId),
+                    Stacks = instance.Stacks,
+                    ExpireAtServerTimeSeconds = expireAtServerTimeSeconds
+                });
+            }
+        }
+
+        private void HandleReplicatedStatusesChanged(NetworkListEvent<ReplicatedStatusState> changeEvent)
+        {
+            RebuildDerivedStateFromReplicated();
+            RaiseStatusesChanged();
+        }
+
+        private void RebuildDerivedStateFromAuthoritative()
         {
             _combinedFlags = StatusFlags.None;
 
-            for (int i = 0; i < _activeStatuses.Count; i++)
+            for (int i = 0; i < _authoritativeStatuses.Count; i++)
             {
-                StatusInstance instance = _activeStatuses[i];
+                StatusInstance instance = _authoritativeStatuses[i];
                 if (instance?.Definition == null)
                 {
                     continue;
@@ -468,19 +520,38 @@ namespace ROC.Statuses
             }
         }
 
-        /// <summary>
-        /// Finds the first active instance using the given definition.
-        /// </summary>
-        private StatusInstance FindInstance(StatusDefinition definition)
+        private void RebuildDerivedStateFromReplicated()
+        {
+            _combinedFlags = StatusFlags.None;
+
+            if (statusCatalog == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < _replicatedStatuses.Count; i++)
+            {
+                ReplicatedStatusState state = _replicatedStatuses[i];
+
+                if (!statusCatalog.TryGetDefinition(state.StatusId.ToString(), out StatusDefinition definition) || definition == null)
+                {
+                    continue;
+                }
+
+                _combinedFlags |= definition.Flags;
+            }
+        }
+
+        private StatusInstance FindAuthoritativeInstance(StatusDefinition definition)
         {
             if (definition == null)
             {
                 return null;
             }
 
-            for (int i = 0; i < _activeStatuses.Count; i++)
+            for (int i = 0; i < _authoritativeStatuses.Count; i++)
             {
-                StatusInstance instance = _activeStatuses[i];
+                StatusInstance instance = _authoritativeStatuses[i];
                 if (instance != null && instance.Definition == definition)
                 {
                     return instance;
@@ -490,9 +561,146 @@ namespace ROC.Statuses
             return null;
         }
 
-        /// <summary>
-        /// Calculates the duration that should be applied when this status is created or refreshed.
-        /// </summary>
+        private float GetMultiplicativeModifierFromAuthoritative(StatusModifierType modifierType)
+        {
+            float result = 1f;
+
+            for (int i = 0; i < _authoritativeStatuses.Count; i++)
+            {
+                StatusInstance instance = _authoritativeStatuses[i];
+                if (instance?.Definition == null)
+                {
+                    continue;
+                }
+
+                StatusModifierDefinition[] modifiers = instance.Definition.Modifiers;
+                if (modifiers == null)
+                {
+                    continue;
+                }
+
+                for (int j = 0; j < modifiers.Length; j++)
+                {
+                    StatusModifierDefinition modifier = modifiers[j];
+                    if (modifier.modifierType == modifierType &&
+                        modifier.operation == StatusModifierOperation.Multiply)
+                    {
+                        result *= modifier.value;
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        private float GetAdditiveModifierFromAuthoritative(StatusModifierType modifierType)
+        {
+            float result = 0f;
+
+            for (int i = 0; i < _authoritativeStatuses.Count; i++)
+            {
+                StatusInstance instance = _authoritativeStatuses[i];
+                if (instance?.Definition == null)
+                {
+                    continue;
+                }
+
+                StatusModifierDefinition[] modifiers = instance.Definition.Modifiers;
+                if (modifiers == null)
+                {
+                    continue;
+                }
+
+                for (int j = 0; j < modifiers.Length; j++)
+                {
+                    StatusModifierDefinition modifier = modifiers[j];
+                    if (modifier.modifierType == modifierType &&
+                        modifier.operation == StatusModifierOperation.Add)
+                    {
+                        result += modifier.value;
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        private float GetMultiplicativeModifierFromReplicated(StatusModifierType modifierType)
+        {
+            float result = 1f;
+
+            if (statusCatalog == null)
+            {
+                return result;
+            }
+
+            for (int i = 0; i < _replicatedStatuses.Count; i++)
+            {
+                ReplicatedStatusState state = _replicatedStatuses[i];
+
+                if (!statusCatalog.TryGetDefinition(state.StatusId.ToString(), out StatusDefinition definition) || definition == null)
+                {
+                    continue;
+                }
+
+                StatusModifierDefinition[] modifiers = definition.Modifiers;
+                if (modifiers == null)
+                {
+                    continue;
+                }
+
+                for (int j = 0; j < modifiers.Length; j++)
+                {
+                    StatusModifierDefinition modifier = modifiers[j];
+                    if (modifier.modifierType == modifierType &&
+                        modifier.operation == StatusModifierOperation.Multiply)
+                    {
+                        result *= modifier.value;
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        private float GetAdditiveModifierFromReplicated(StatusModifierType modifierType)
+        {
+            float result = 0f;
+
+            if (statusCatalog == null)
+            {
+                return result;
+            }
+
+            for (int i = 0; i < _replicatedStatuses.Count; i++)
+            {
+                ReplicatedStatusState state = _replicatedStatuses[i];
+
+                if (!statusCatalog.TryGetDefinition(state.StatusId.ToString(), out StatusDefinition definition) || definition == null)
+                {
+                    continue;
+                }
+
+                StatusModifierDefinition[] modifiers = definition.Modifiers;
+                if (modifiers == null)
+                {
+                    continue;
+                }
+
+                for (int j = 0; j < modifiers.Length; j++)
+                {
+                    StatusModifierDefinition modifier = modifiers[j];
+                    if (modifier.modifierType == modifierType &&
+                        modifier.operation == StatusModifierOperation.Add)
+                    {
+                        result += modifier.value;
+                    }
+                }
+            }
+
+            return result;
+        }
+
         private float CalculateAppliedDuration(StatusDefinition definition, float durationOverrideSeconds)
         {
             if (definition == null)
@@ -513,9 +721,6 @@ namespace ROC.Statuses
             return definition.DefaultDurationSeconds;
         }
 
-        /// <summary>
-        /// Central helper for raising the changed event.
-        /// </summary>
         private void RaiseStatusesChanged()
         {
             StatusesChanged?.Invoke();

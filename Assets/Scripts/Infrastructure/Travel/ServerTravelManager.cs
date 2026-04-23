@@ -14,8 +14,11 @@ using Unity.Netcode;
 /// - Manually spawn each client's PlayerObject at a configured destination
 /// - Provide reusable methods for same-scene teleports and cross-scene transfers
 ///
-/// This is intended to be a reusable foundation, not an Intro-only script.
-/// The Intro is simply the first configured destination.
+/// This version also supports optional SpawnArrivalProfile behavior on SpawnPoints.
+/// That allows cases like:
+/// - spawning directly into a bed/chair anchor
+/// - applying Resting on arrival
+/// - initializing PlayerAnchorState on arrival
 /// </summary>
 [RequireComponent(typeof(NetworkManager))]
 public class ServerTravelManager : MonoBehaviour
@@ -31,26 +34,10 @@ public class ServerTravelManager : MonoBehaviour
     [Tooltip("If true, the player object is destroyed when its scene unloads. Usually false for persistent player objects.")]
     [SerializeField] private bool destroyPlayerWithScene = false;
 
-    // Cached reference to the local NetworkManager.
     private NetworkManager _networkManager;
-
-    /// <summary>
-    /// Tracks whether the initial destination scene is fully ready on the server.
-    /// We only want to spawn players after the server-side scene is loaded and ready.
-    /// </summary>
     private bool _initialSceneReady;
-
-    /// <summary>
-    /// Tracks whether we have successfully subscribed to NGO scene events.
-    /// We subscribe only after the server has started, because SceneManager may not
-    /// be ready earlier.
-    /// </summary>
     private bool _sceneEventsSubscribed;
 
-    /// <summary>
-    /// Client IDs waiting for their first PlayerObject spawn.
-    /// A client gets added here after NGO reports SynchronizeComplete.
-    /// </summary>
     private readonly HashSet<ulong> _pendingInitialSpawnClients = new();
 
     private void Awake()
@@ -86,8 +73,6 @@ public class ServerTravelManager : MonoBehaviour
             return;
         }
 
-        // Safe to subscribe before server startup.
-        // The server-start callback tells us when NGO is fully running.
         _networkManager.OnServerStarted += HandleServerStarted;
     }
 
@@ -100,7 +85,6 @@ public class ServerTravelManager : MonoBehaviour
 
         _networkManager.OnServerStarted -= HandleServerStarted;
 
-        // Unsubscribe from scene events if we were subscribed.
         if (_sceneEventsSubscribed && _networkManager.SceneManager != null)
         {
             _networkManager.SceneManager.OnSceneEvent -= HandleSceneEvent;
@@ -108,15 +92,6 @@ public class ServerTravelManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Called once the server has successfully started listening.
-    ///
-    /// This is the correct time to:
-    /// - confirm scene management is enabled
-    /// - subscribe to NGO scene events
-    /// - set synchronization mode
-    /// - load the initial gameplay scene
-    /// </summary>
     private void HandleServerStarted()
     {
         if (!_networkManager.IsServer)
@@ -136,7 +111,6 @@ public class ServerTravelManager : MonoBehaviour
             return;
         }
 
-        // Subscribe now, after NGO is fully started.
         if (!_sceneEventsSubscribed)
         {
             _networkManager.SceneManager.OnSceneEvent += HandleSceneEvent;
@@ -144,12 +118,8 @@ public class ServerTravelManager : MonoBehaviour
             Debug.Log("[ServerTravelManager] Subscribed to NetworkSceneManager.OnSceneEvent.");
         }
 
-        // Be explicit about synchronization behavior.
-        // For now, Single mode is the correct choice:
-        // when a client connects, NGO will sync them into the server's active scene.
         _networkManager.SceneManager.SetClientSynchronizationMode(LoadSceneMode.Single);
 
-        // If the active scene is already the intended initial scene, mark it ready.
         if (SceneManager.GetActiveScene().name == initialDestination.sceneName)
         {
             _initialSceneReady = true;
@@ -169,13 +139,6 @@ public class ServerTravelManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Handles NGO scene events.
-    ///
-    /// We primarily care about:
-    /// - LoadEventCompleted: tells us the initial gameplay scene finished loading
-    /// - SynchronizeComplete: tells us a client finished scene/object synchronization
-    /// </summary>
     private void HandleSceneEvent(SceneEvent sceneEvent)
     {
         if (!_networkManager.IsServer)
@@ -189,7 +152,6 @@ public class ServerTravelManager : MonoBehaviour
         {
             case SceneEventType.LoadEventCompleted:
             {
-                // Once the initial scene finishes loading, mark it ready and set it active.
                 if (sceneEvent.SceneName == initialDestination.sceneName)
                 {
                     Scene targetScene = SceneManager.GetSceneByName(initialDestination.sceneName);
@@ -207,8 +169,6 @@ public class ServerTravelManager : MonoBehaviour
                     _initialSceneReady = true;
                     Debug.Log($"[ServerTravelManager] Initial scene '{initialDestination.sceneName}' is ready.");
 
-                    // In case any clients already finished synchronization while we were waiting,
-                    // attempt to spawn them now.
                     TrySpawnPendingInitialPlayers();
                 }
 
@@ -219,7 +179,6 @@ public class ServerTravelManager : MonoBehaviour
             {
                 ulong clientId = sceneEvent.ClientId;
 
-                // Skip the dedicated server itself.
                 if (clientId == NetworkManager.ServerClientId)
                 {
                     return;
@@ -227,10 +186,7 @@ public class ServerTravelManager : MonoBehaviour
 
                 Debug.Log($"[ServerTravelManager] Client {clientId} finished synchronization.");
 
-                // Add this client to the pending first-spawn list.
                 _pendingInitialSpawnClients.Add(clientId);
-
-                // If the scene is already ready, this may spawn immediately.
                 TrySpawnPendingInitialPlayers();
 
                 break;
@@ -238,14 +194,6 @@ public class ServerTravelManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Attempts to spawn PlayerObjects for any connected clients waiting on their first spawn.
-    ///
-    /// A client will only be spawned if:
-    /// - the initial scene is ready
-    /// - the client is still connected
-    /// - the client does not already have a PlayerObject
-    /// </summary>
     private void TrySpawnPendingInitialPlayers()
     {
         Debug.Log($"[ServerTravelManager] TrySpawnPendingInitialPlayers called. initialSceneReady={_initialSceneReady}, pendingCount={_pendingInitialSpawnClients.Count}");
@@ -259,14 +207,12 @@ public class ServerTravelManager : MonoBehaviour
 
         foreach (ulong clientId in _pendingInitialSpawnClients)
         {
-            // Make sure the client is still connected.
             if (!_networkManager.ConnectedClients.TryGetValue(clientId, out NetworkClient client))
             {
                 handledClients.Add(clientId);
                 continue;
             }
 
-            // If the client already has a PlayerObject, do not create another one.
             if (client.PlayerObject != null)
             {
                 handledClients.Add(clientId);
@@ -280,7 +226,6 @@ public class ServerTravelManager : MonoBehaviour
             }
         }
 
-        // Remove successfully handled clients from the pending set.
         foreach (ulong clientId in handledClients)
         {
             _pendingInitialSpawnClients.Remove(clientId);
@@ -290,7 +235,10 @@ public class ServerTravelManager : MonoBehaviour
     /// <summary>
     /// Spawns a new PlayerObject for a client at a specific destination.
     ///
-    /// This should only be used when the client does NOT already have a PlayerObject.
+    /// If the resolved SpawnPoint has a SpawnArrivalProfile, the profile may:
+    /// - override the initial transform
+    /// - initialize PlayerAnchorState
+    /// - apply arrival statuses such as Resting
     /// </summary>
     public bool SpawnPlayerForClient(ulong clientId, TravelDestination destination)
     {
@@ -311,33 +259,37 @@ public class ServerTravelManager : MonoBehaviour
             ? spawnPoint.transform.rotation
             : Quaternion.identity;
 
+        SpawnArrivalProfile arrivalProfile = spawnPoint.ArrivalProfile;
+
+        // Let the arrival profile optionally override the player's initial transform.
+        if (arrivalProfile != null)
+        {
+            arrivalProfile.GetInitialSpawnPose(
+                spawnPosition,
+                spawnRotation,
+                out spawnPosition,
+                out spawnRotation);
+        }
+
         NetworkObject playerInstance = Instantiate(playerPrefab, spawnPosition, spawnRotation);
 
         // These settings make later scene travel easier.
-        // ActiveSceneSynchronization:
-        // - if the active scene changes later, this object can follow automatically.
-        //
-        // SceneMigrationSynchronization:
-        // - if we manually move the object to another scene later, NGO can synchronize that move.
         playerInstance.ActiveSceneSynchronization = true;
         playerInstance.SceneMigrationSynchronization = true;
 
         // Register this object as the official PlayerObject for the specified client.
         playerInstance.SpawnAsPlayerObject(clientId, destroyPlayerWithScene);
 
+        // Apply any post-spawn arrival behavior on the server.
+        if (arrivalProfile != null)
+        {
+            arrivalProfile.ApplyToPlayer(playerInstance.gameObject);
+        }
+
         Debug.Log($"[ServerTravelManager] Spawned player for ClientId {clientId} at {destination}.");
         return true;
     }
 
-    /// <summary>
-    /// Teleports an already-spawned player within their current scene.
-    ///
-    /// Use this for:
-    /// - ladders
-    /// - same-scene portals
-    /// - short-range magical repositioning
-    /// - roof access
-    /// </summary>
     public bool TeleportPlayerInCurrentScene(NetworkObject playerObject, string spawnPointId)
     {
         if (!_networkManager.IsServer)
@@ -372,13 +324,6 @@ public class ServerTravelManager : MonoBehaviour
         return true;
     }
 
-    /// <summary>
-    /// Transfers an already-spawned player to a destination in another loaded scene.
-    ///
-    /// IMPORTANT:
-    /// This first-pass implementation assumes the destination scene is already loaded
-    /// on the server. That is enough for now.
-    /// </summary>
     public bool TransferPlayerToLoadedScene(NetworkObject playerObject, TravelDestination destination)
     {
         if (!_networkManager.IsServer)
@@ -401,9 +346,6 @@ public class ServerTravelManager : MonoBehaviour
 
         Scene destinationScene = spawnPoint.gameObject.scene;
 
-        // Move the player's GameObject into the target scene on the server.
-        // Because SceneMigrationSynchronization is enabled on the NetworkObject,
-        // NGO can synchronize this move to connected clients.
         SceneManager.MoveGameObjectToScene(playerObject.gameObject, destinationScene);
 
         Quaternion rotationToUse = spawnPoint.UseRotation
@@ -418,9 +360,6 @@ public class ServerTravelManager : MonoBehaviour
         return true;
     }
 
-    /// <summary>
-    /// Resolves a TravelDestination into a concrete SpawnPoint inside a loaded scene.
-    /// </summary>
     private bool TryResolveSpawnPoint(TravelDestination destination, out SpawnPoint spawnPoint)
     {
         spawnPoint = null;
@@ -436,9 +375,6 @@ public class ServerTravelManager : MonoBehaviour
         return TryFindSpawnPointInScene(destinationScene, destination.spawnPointId, out spawnPoint);
     }
 
-    /// <summary>
-    /// Searches a specific scene for a SpawnPoint with the requested ID.
-    /// </summary>
     private bool TryFindSpawnPointInScene(Scene scene, string spawnPointId, out SpawnPoint spawnPoint)
     {
         spawnPoint = null;

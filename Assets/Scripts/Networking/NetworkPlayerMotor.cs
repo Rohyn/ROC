@@ -1,37 +1,35 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using Unity.Netcode;
+using Unity.Netcode.Components;
 using ROC.Statuses;
 
 /// <summary>
-/// First-pass local player motor for testing third-person movement feel.
+/// First-pass server-authoritative player motor.
 ///
 /// DESIGN GOALS:
-/// - Use CharacterController for simple grounded movement
-/// - Move relative to the current camera facing
-/// - Apply gravity and optional jump
-/// - Respect status flags such as NoMovement and NoRotation
-/// - Optionally rotate toward movement direction
+/// - The owning client gathers input locally.
+/// - The owning client sends desired movement input to the server.
+/// - The server simulates movement using CharacterController.
+/// - NetworkTransform replicates the authoritative position to all clients.
 ///
 /// IMPORTANT:
-/// This is still a local feel-test controller, not final server-authoritative MMO movement.
-/// It is meant to pair with PlayerLookController:
-/// - direct mouselook should usually control facing
-/// - rotateTowardMovement should usually be FALSE for that setup
+/// - This version intentionally focuses on authoritative POSITION first.
+/// - Rotation is left local for now so your direct-mouselook camera stays responsive.
+/// - That means NetworkTransform rotation sync should be disabled for now.
+/// - Later, we can make gameplay-facing authoritative too.
+///
+/// This script also reads server-side status flags/modifiers,
+/// which means once interactions are executed on the server,
+/// statuses like Resting can correctly block authoritative movement.
 /// </summary>
 [RequireComponent(typeof(CharacterController))]
+[RequireComponent(typeof(NetworkTransform))]
 public class NetworkPlayerMotor : NetworkBehaviour
 {
     [Header("Movement")]
     [Tooltip("How fast the player moves on the ground in units per second.")]
     [SerializeField] private float moveSpeed = 4.5f;
-
-    [Tooltip("How quickly the player rotates to face movement direction when rotateTowardMovement is enabled.")]
-    [SerializeField] private float rotationSpeed = 12f;
-
-    [Header("Facing")]
-    [Tooltip("If true, the player rotates to face movement direction. For direct mouselook, leave this false.")]
-    [SerializeField] private bool rotateTowardMovement = false;
 
     [Header("Jump / Gravity")]
     [Tooltip("How high the player jumps in Unity units. Set to 0 to disable jumping for now.")]
@@ -51,9 +49,26 @@ public class NetworkPlayerMotor : NetworkBehaviour
     [Tooltip("Optional reference to the StatusManager on this player. If left empty, the script will try to find one on the same GameObject.")]
     [SerializeField] private StatusManager statusManager;
 
+    [Header("Debug")]
+    [Tooltip("If true, input submission and server movement events will be logged.")]
+    [SerializeField] private bool verboseLogging = false;
+
     private CharacterController _characterController;
-    private float _verticalVelocity;
     private Transform _cameraTransform;
+
+    // -----------------------------
+    // Local owner-collected input
+    // -----------------------------
+    private Vector2 _localMoveInput;
+    private bool _localJumpQueued;
+    private Vector3 _localDesiredMoveWorld;
+
+    // -----------------------------
+    // Server-authoritative input state
+    // -----------------------------
+    private Vector3 _serverDesiredMoveWorld;
+    private bool _serverJumpQueued;
+    private float _verticalVelocity;
 
     private void Awake()
     {
@@ -74,18 +89,23 @@ public class NetworkPlayerMotor : NetworkBehaviour
 
     public override void OnNetworkSpawn()
     {
-        // Only the owning client should process local movement input.
-        if (!IsOwner)
+        // We still need this component active on the server for authoritative simulation.
+        // Only pure non-owner clients can safely disable it.
+        if (!IsOwner && !IsServer)
         {
             enabled = false;
             return;
         }
 
-        CacheCameraReference();
+        if (IsOwner)
+        {
+            CacheCameraReference();
+        }
     }
 
     private void Update()
     {
+        // Only the owning client should gather local input.
         if (!IsOwner)
         {
             return;
@@ -96,10 +116,100 @@ public class NetworkPlayerMotor : NetworkBehaviour
             CacheCameraReference();
         }
 
-        Vector2 moveInput = ReadMoveInput();
+        CollectLocalInput();
+    }
 
+    private void FixedUpdate()
+    {
+        // Owner sends latest input to authority.
+        if (IsOwner)
+        {
+            PushLocalInputToAuthority();
+        }
+
+        // Server simulates the authoritative movement.
+        if (IsServer)
+        {
+            SimulateAuthoritativeMovement(Time.fixedDeltaTime);
+        }
+    }
+
+    /// <summary>
+    /// Collects local owner input and converts movement into a world-space desired move vector.
+    /// </summary>
+    private void CollectLocalInput()
+    {
+        _localMoveInput = ReadMoveInput();
+
+        Keyboard keyboard = Keyboard.current;
+        if (keyboard != null && keyboard.spaceKey.wasPressedThisFrame)
+        {
+            _localJumpQueued = true;
+        }
+
+        _localDesiredMoveWorld = CalculateCameraRelativeMoveWorld(_localMoveInput);
+    }
+
+    /// <summary>
+    /// Sends the current local input state to the server.
+    ///
+    /// On host, we can assign directly without sending an RPC to ourselves.
+    /// </summary>
+    private void PushLocalInputToAuthority()
+    {
+        Vector3 desiredMoveWorld = _localDesiredMoveWorld;
+        bool jumpPressed = _localJumpQueued;
+
+        if (IsServer)
+        {
+            _serverDesiredMoveWorld = desiredMoveWorld;
+
+            if (jumpPressed)
+            {
+                _serverJumpQueued = true;
+            }
+        }
+        else
+        {
+            SubmitMovementInputRpc(desiredMoveWorld, jumpPressed);
+        }
+
+        // Jump is a one-shot input. Once sent, clear the local queue.
+        _localJumpQueued = false;
+    }
+
+    /// <summary>
+    /// Client -> Server input submission.
+    ///
+    /// This is the core of the server-authoritative movement path:
+    /// the client sends desired movement, but only the server actually moves the player.
+    /// </summary>
+    [Rpc(SendTo.Server)]
+    private void SubmitMovementInputRpc(Vector3 desiredMoveWorld, bool jumpPressed)
+    {
+        // Flatten and clamp for safety.
+        desiredMoveWorld.y = 0f;
+        desiredMoveWorld = Vector3.ClampMagnitude(desiredMoveWorld, 1f);
+
+        _serverDesiredMoveWorld = desiredMoveWorld;
+
+        if (jumpPressed)
+        {
+            _serverJumpQueued = true;
+        }
+
+        if (verboseLogging)
+        {
+            Debug.Log($"[NetworkPlayerMotor] Server received input. Move={desiredMoveWorld}, Jump={jumpPressed}");
+        }
+    }
+
+    /// <summary>
+    /// Runs only on the server and applies authoritative movement.
+    /// </summary>
+    private void SimulateAuthoritativeMovement(float deltaTime)
+    {
         bool noMovement = statusManager != null && statusManager.HasFlag(StatusFlags.NoMovement);
-        bool noRotation = statusManager != null && statusManager.HasFlag(StatusFlags.NoRotation);
 
         float movementMultiplier = 1f;
         if (statusManager != null)
@@ -107,33 +217,25 @@ public class NetworkPlayerMotor : NetworkBehaviour
             movementMultiplier = statusManager.GetMultiplicativeModifier(StatusModifierType.MoveSpeed);
         }
 
-        // If movement is blocked, ignore movement input entirely.
-        if (noMovement)
-        {
-            moveInput = Vector2.zero;
-        }
+        Vector3 moveDirection = noMovement
+            ? Vector3.zero
+            : Vector3.ClampMagnitude(_serverDesiredMoveWorld, 1f);
 
-        Vector3 moveDirection = CalculateCameraRelativeMove(moveInput);
+        HandleGroundingAndGravity(deltaTime);
 
-        HandleGroundingAndGravity();
-
-        // Only allow jumping when movement is not blocked.
         if (!noMovement)
         {
-            HandleJumpInput();
+            HandleJumpServer();
         }
 
         Vector3 finalVelocity =
             (moveDirection * moveSpeed * movementMultiplier) +
             (Vector3.up * _verticalVelocity);
 
-        _characterController.Move(finalVelocity * Time.deltaTime);
+        _characterController.Move(finalVelocity * deltaTime);
 
-        // In direct mouselook mode, leave this OFF so mouse/controller look owns facing.
-        if (!noRotation && rotateTowardMovement)
-        {
-            RotateTowardMovement(moveDirection);
-        }
+        // Jump is also one-shot on the server side.
+        _serverJumpQueued = false;
     }
 
     /// <summary>
@@ -169,18 +271,17 @@ public class NetworkPlayerMotor : NetworkBehaviour
             input.x -= 1f;
         }
 
-        // Prevent diagonal movement from being faster than straight movement.
         input = Vector2.ClampMagnitude(input, 1f);
-
         return input;
     }
 
     /// <summary>
-    /// Converts 2D input into a camera-relative world movement vector.
+    /// Converts 2D movement input into a camera-relative world-space move direction.
     ///
-    /// If no camera exists yet, the script falls back to the player's own forward/right axes.
+    /// Because the server does not know the client's camera orientation,
+    /// we do this conversion locally on the owning client and send the resulting world-space direction.
     /// </summary>
-    private Vector3 CalculateCameraRelativeMove(Vector2 moveInput)
+    private Vector3 CalculateCameraRelativeMoveWorld(Vector2 moveInput)
     {
         Transform referenceTransform = _cameraTransform != null ? _cameraTransform : transform;
 
@@ -197,15 +298,13 @@ public class NetworkPlayerMotor : NetworkBehaviour
             (right * moveInput.x);
 
         moveDirection = Vector3.ClampMagnitude(moveDirection, 1f);
-
         return moveDirection;
     }
 
     /// <summary>
-    /// Handles grounded behavior and gravity accumulation.
-    /// CharacterController.isGrounded reflects the result of the last move step.
+    /// Handles grounded state and gravity accumulation on the server.
     /// </summary>
-    private void HandleGroundingAndGravity()
+    private void HandleGroundingAndGravity(float deltaTime)
     {
         if (_characterController.isGrounded)
         {
@@ -215,53 +314,25 @@ public class NetworkPlayerMotor : NetworkBehaviour
             }
         }
 
-        _verticalVelocity += gravity * Time.deltaTime;
+        _verticalVelocity += gravity * deltaTime;
     }
 
     /// <summary>
-    /// Handles jump input using Space.
+    /// Applies jump on the server if queued and grounded.
     /// </summary>
-    private void HandleJumpInput()
+    private void HandleJumpServer()
     {
         if (jumpHeight <= 0f)
         {
             return;
         }
 
-        Keyboard keyboard = Keyboard.current;
-        if (keyboard == null)
-        {
-            return;
-        }
-
-        if (_characterController.isGrounded && keyboard.spaceKey.wasPressedThisFrame)
+        if (_serverJumpQueued && _characterController.isGrounded)
         {
             _verticalVelocity = Mathf.Sqrt(jumpHeight * -2f * gravity);
         }
     }
 
-    /// <summary>
-    /// Smoothly rotates the player to face movement direction.
-    /// Only used when rotateTowardMovement is enabled.
-    /// </summary>
-    private void RotateTowardMovement(Vector3 moveDirection)
-    {
-        if (moveDirection.sqrMagnitude < 0.0001f)
-        {
-            return;
-        }
-
-        Quaternion targetRotation = Quaternion.LookRotation(moveDirection, Vector3.up);
-
-        transform.rotation = Quaternion.Slerp(
-            transform.rotation,
-            targetRotation,
-            rotationSpeed * Time.deltaTime);
-    }
-
-    /// <summary>
-    /// Finds the camera transform used for camera-relative movement.
-    /// </summary>
     private void CacheCameraReference()
     {
         if (cameraTransformOverride != null)

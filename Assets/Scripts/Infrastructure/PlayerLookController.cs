@@ -159,8 +159,14 @@ public class PlayerLookController : NetworkBehaviour
     private void HandleModeToggleInput(Keyboard keyboard)
     {
         // '.' toggles the temporary free-cursor mode.
+        // Do NOT let this override the full menu mode.
         if (keyboard[toggleFreeCursorKey].wasPressedThisFrame)
         {
+            if (CurrentCursorMode == CursorModeState.MenuCursor)
+            {
+                return;
+            }
+
             if (CurrentCursorMode == CursorModeState.TemporaryFreeCursor)
             {
                 SetCursorMode(CursorModeState.GameplayLocked);
@@ -173,7 +179,7 @@ public class PlayerLookController : NetworkBehaviour
             return;
         }
 
-        // Tab toggles the general menu cursor mode.
+        // Tab toggles the general menu mode.
         if (keyboard[toggleMenuKey].wasPressedThisFrame)
         {
             if (CurrentCursorMode == CursorModeState.MenuCursor)

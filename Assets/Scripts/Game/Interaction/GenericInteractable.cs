@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.Netcode;
 
 /// <summary>
 /// Generic interaction shell placed on any object the player can use.
@@ -7,38 +8,44 @@ using UnityEngine;
 /// This script does NOT hardcode any specific behavior like "rest" or "rotate".
 /// Instead, it discovers attached InteractableAction components and executes them.
 ///
-/// This is the compositional core of the interaction system.
+/// This version also supports interaction consumption scope:
+/// - None
+/// - PerPlayer
+/// - Global
 ///
-/// NEW IN THIS VERSION:
-/// - Optional interaction focus point for simple interactables
-/// - Optional interaction target collider for "wide" interactables like beds, tables, counters, etc.
-/// - Selection priority bonus for later use
-/// - Range checks can evaluate against the best available interaction point, not just the object root
+/// IMPORTANT:
+/// This is about AVAILABILITY after a successful interaction, not effect audience.
+/// Future "buff all players in scene/range" behavior should be modeled at the action level,
+/// not here.
 /// </summary>
-public class GenericInteractable : MonoBehaviour
+[RequireComponent(typeof(NetworkObject))]
+public class GenericInteractable : NetworkBehaviour
 {
     [Header("Interaction")]
-    [Tooltip("Text that can later be shown in the UI, for example 'Rest' or 'Open Door'.")]
     [SerializeField] private string interactionPrompt = "Interact";
-
-    [Tooltip("Maximum interaction distance measured from the player to this interactable.")]
     [SerializeField] private float interactionRange = 2.5f;
-
-    [Tooltip("If false, this object ignores interaction requests.")]
     [SerializeField] private bool isEnabled = true;
 
     [Header("Selection / Targeting")]
-    [Tooltip("Optional point used for scoring and prompts when no target collider is provided.")]
     [SerializeField] private Transform interactionFocusPoint;
-
-    [Tooltip("Optional collider used as the selection target volume. When assigned, the selector can use ClosestPoint on this collider, which is ideal for large or low objects like beds.")]
     [SerializeField] private Collider interactionTargetCollider;
-
-    [Tooltip("Optional selection bias. Higher values make this interactable slightly easier to keep selected compared with other nearby options.")]
     [SerializeField] private float selectionPriorityBonus = 0f;
 
-    // Cached ordered actions on this object.
+    [Header("Consumption")]
+    [Tooltip("If true, a successful interaction will consume this interactable according to the selected mode.")]
+    [SerializeField] private bool consumeOnSuccessfulInteraction = false;
+
+    [Tooltip("Controls who loses access to this interactable after successful use.")]
+    [SerializeField] private InteractionConsumptionMode consumptionMode = InteractionConsumptionMode.None;
+
+    [Header("Debug")]
+    [SerializeField] private bool verboseLogging = true;
+
     private readonly List<InteractableAction> _actions = new();
+
+    // Server-only state
+    private bool _globallyConsumed;
+    private readonly HashSet<ulong> _consumedByClientIds = new();
 
     public string InteractionPrompt => interactionPrompt;
     public float InteractionRange => interactionRange;
@@ -46,9 +53,6 @@ public class GenericInteractable : MonoBehaviour
     public float SelectionPriorityBonus => selectionPriorityBonus;
     public Collider InteractionTargetCollider => interactionTargetCollider;
 
-    /// <summary>
-    /// Simple fallback focus position used if no target collider is assigned.
-    /// </summary>
     public Vector3 InteractionFocusPosition =>
         interactionFocusPoint != null ? interactionFocusPoint.position : transform.position;
 
@@ -57,10 +61,22 @@ public class GenericInteractable : MonoBehaviour
         CacheActions();
     }
 
-    /// <summary>
-    /// Rebuilds and sorts the action list.
-    /// This is useful if you add/remove action components during editing.
-    /// </summary>
+    public override void OnNetworkSpawn()
+    {
+        if (IsServer)
+        {
+            NetworkObject.CheckObjectVisibility += CheckVisibility;
+        }
+    }
+
+    public override void OnNetworkDespawn()
+    {
+        if (IsServer)
+        {
+            NetworkObject.CheckObjectVisibility -= CheckVisibility;
+        }
+    }
+
     private void CacheActions()
     {
         _actions.Clear();
@@ -79,14 +95,6 @@ public class GenericInteractable : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Returns the best point on or for this interactable to evaluate against from a given origin.
-    ///
-    /// Priority:
-    /// 1. ClosestPoint on the configured target collider
-    /// 2. Explicit interaction focus point
-    /// 3. Interactable root transform position
-    /// </summary>
     public Vector3 GetInteractionEvaluationPoint(Vector3 origin)
     {
         if (interactionTargetCollider != null)
@@ -97,14 +105,6 @@ public class GenericInteractable : MonoBehaviour
         return InteractionFocusPosition;
     }
 
-    /// <summary>
-    /// Returns true if the specified interactor is close enough and this interactable is enabled.
-    ///
-    /// IMPORTANT:
-    /// This version checks range against the best available interaction evaluation point,
-    /// not just the interactable's root transform.
-    /// That makes large objects like beds behave much more naturally.
-    /// </summary>
     public bool CanInteract(GameObject interactorObject)
     {
         if (!isEnabled)
@@ -117,6 +117,26 @@ public class GenericInteractable : MonoBehaviour
             return false;
         }
 
+        // Server can enforce consumption rules authoritatively.
+        if (IsServer)
+        {
+            if (_globallyConsumed)
+            {
+                return false;
+            }
+
+            NetworkObject interactorNetworkObject = interactorObject.GetComponent<NetworkObject>();
+            if (interactorNetworkObject != null)
+            {
+                ulong clientId = interactorNetworkObject.OwnerClientId;
+
+                if (_consumedByClientIds.Contains(clientId))
+                {
+                    return false;
+                }
+            }
+        }
+
         Vector3 interactorPosition = interactorObject.transform.position;
         Vector3 evaluationPoint = GetInteractionEvaluationPoint(interactorPosition);
 
@@ -124,17 +144,14 @@ public class GenericInteractable : MonoBehaviour
         return distance <= interactionRange;
     }
 
-    /// <summary>
-    /// Attempts to run this interactable for the given interactor.
-    ///
-    /// For now:
-    /// - validates distance
-    /// - builds an interaction context
-    /// - executes all attached actions whose CanExecute passes
-    /// - stops early if an action sets context.StopFurtherActions
-    /// </summary>
     public bool TryInteract(GameObject interactorObject)
     {
+        if (!IsServer)
+        {
+            Debug.LogWarning("[GenericInteractable] TryInteract should be executed on the server.", this);
+            return false;
+        }
+
         if (!CanInteract(interactorObject))
         {
             return false;
@@ -168,6 +185,96 @@ public class GenericInteractable : MonoBehaviour
             }
         }
 
+        if (executedAtLeastOneAction && consumeOnSuccessfulInteraction)
+        {
+            ApplyConsumption(context);
+        }
+
         return executedAtLeastOneAction;
+    }
+
+    private void ApplyConsumption(InteractionContext context)
+    {
+        switch (consumptionMode)
+        {
+            case InteractionConsumptionMode.None:
+                return;
+
+            case InteractionConsumptionMode.PerPlayer:
+            {
+                if (!context.HasInteractorClientId)
+                {
+                    return;
+                }
+
+                MarkConsumedForClient(context.InteractorClientId);
+                return;
+            }
+
+            case InteractionConsumptionMode.Global:
+            {
+                MarkConsumedGlobally();
+                return;
+            }
+        }
+    }
+
+    private void MarkConsumedForClient(ulong clientId)
+    {
+        if (!_consumedByClientIds.Add(clientId))
+        {
+            return;
+        }
+
+        if (verboseLogging)
+        {
+            Debug.Log($"[GenericInteractable] Marked '{name}' consumed for client {clientId}.", this);
+        }
+
+        if (NetworkObject.IsSpawned && NetworkObject.IsNetworkVisibleTo(clientId))
+        {
+            NetworkObject.NetworkHide(clientId);
+        }
+    }
+
+    private void MarkConsumedGlobally()
+    {
+        if (_globallyConsumed)
+        {
+            return;
+        }
+
+        _globallyConsumed = true;
+
+        if (verboseLogging)
+        {
+            Debug.Log($"[GenericInteractable] Marked '{name}' globally consumed.", this);
+        }
+
+        foreach (ulong clientId in NetworkManager.ConnectedClientsIds)
+        {
+            if (NetworkObject.IsSpawned && NetworkObject.IsNetworkVisibleTo(clientId))
+            {
+                NetworkObject.NetworkHide(clientId);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Visibility callback used for late-joiners and initial spawn visibility.
+    /// </summary>
+    private bool CheckVisibility(ulong clientId)
+    {
+        if (_globallyConsumed)
+        {
+            return false;
+        }
+
+        if (_consumedByClientIds.Contains(clientId))
+        {
+            return false;
+        }
+
+        return true;
     }
 }
