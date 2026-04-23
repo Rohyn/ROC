@@ -5,13 +5,14 @@ namespace ROC.Inventory
     /// <summary>
     /// Authored definition for an inventory item.
     ///
-    /// This is intentionally very small for now.
-    /// It is enough to support:
-    /// - a unique item ID
-    /// - a player-facing name
-    /// - max stack size
+    /// This version adds a simple "equippable" flag so the inventory can decide
+    /// whether an item may be moved into the equipped state.
     ///
-    /// For the infirmary key, set Max Stack to 1.
+    /// For now:
+    /// - Shirt / Pants: IsEquippable = true
+    /// - Infirmary Key: IsEquippable = false
+    ///
+    /// Equipment slot restrictions can be added later.
     /// </summary>
     [CreateAssetMenu(
         fileName = "ItemDefinition",
@@ -26,9 +27,13 @@ namespace ROC.Inventory
         [Min(1)]
         [SerializeField] private int maxStack = 1;
 
+        [Header("Equipment")]
+        [SerializeField] private bool isEquippable = false;
+
         public string ItemId => itemId;
         public string DisplayName => displayName;
         public int MaxStack => maxStack;
+        public bool IsEquippable => isEquippable;
 
         private void OnValidate()
         {

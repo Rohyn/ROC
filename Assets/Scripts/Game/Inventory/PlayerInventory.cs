@@ -6,50 +6,65 @@ using UnityEngine;
 namespace ROC.Inventory
 {
     /// <summary>
-    /// Very basic server-authoritative inventory.
+    /// Basic server-authoritative inventory with support for:
+    /// - bag items
+    /// - equipped items
     ///
     /// DESIGN:
-    /// - Server owns and mutates inventory state
-    /// - Clients receive a replicated read-only view through NetworkList
+    /// - Server owns and mutates both collections
+    /// - Clients receive replicated read-only views through NetworkList
+    /// - Client UI can request equip/unequip through RPCs on the owning player's inventory
     ///
     /// CURRENT SCOPE:
-    /// - add items
-    /// - remove items
-    /// - query quantity
-    /// - query whether an item can be accepted
+    /// - add/remove items from bags
+    /// - move one unit of an equippable item from bags -> equipped
+    /// - move one unit from equipped -> bags
     ///
-    /// This is intentionally enough to support the infirmary key milestone.
+    /// INTENTIONAL LIMITATION:
+    /// - no equipment slot rules yet
+    /// - if an item is equippable and you have multiple copies, multiple copies can be equipped
+    /// - that is acceptable for this milestone and can be restricted later
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(NetworkObject))]
     public class PlayerInventory : NetworkBehaviour
     {
+        public enum InventoryCollection
+        {
+            Bag = 0,
+            Equipped = 1
+        }
+
         [Header("References")]
         [SerializeField] private ItemCatalog itemCatalog;
 
         [Header("Debug")]
         [SerializeField] private bool verboseLogging = true;
 
-        private readonly NetworkList<ReplicatedInventoryEntry> _items = new();
+        private readonly NetworkList<ReplicatedInventoryEntry> _bagItems = new();
+        private readonly NetworkList<ReplicatedInventoryEntry> _equippedItems = new();
 
         public event Action InventoryChanged;
 
         public override void OnNetworkSpawn()
         {
-            _items.OnListChanged += HandleListChanged;
+            _bagItems.OnListChanged += HandleAnyListChanged;
+            _equippedItems.OnListChanged += HandleAnyListChanged;
             InventoryChanged?.Invoke();
         }
 
         public override void OnNetworkDespawn()
         {
-            _items.OnListChanged -= HandleListChanged;
+            _bagItems.OnListChanged -= HandleAnyListChanged;
+            _equippedItems.OnListChanged -= HandleAnyListChanged;
         }
 
+        // ---------------------------------------------------------------------
+        // Bag item API
+        // ---------------------------------------------------------------------
+
         /// <summary>
-        /// Returns true if the inventory can accept the specified quantity of the item.
-        ///
-        /// For this first version, each item exists as a single logical stack.
-        /// If the existing stack is full, the item cannot be accepted.
+        /// Returns true if the BAG inventory can accept the specified quantity of the item.
         /// </summary>
         public bool CanAcceptItem(ItemDefinition itemDefinition, int quantity = 1)
         {
@@ -58,7 +73,7 @@ namespace ROC.Inventory
                 return false;
             }
 
-            int existingQuantity = GetQuantity(itemDefinition);
+            int existingQuantity = GetQuantity(itemDefinition, InventoryCollection.Bag);
 
             if (itemDefinition.MaxStack <= 0)
             {
@@ -69,7 +84,7 @@ namespace ROC.Inventory
         }
 
         /// <summary>
-        /// Server-only add item.
+        /// Server-only add item to BAGS.
         /// </summary>
         public bool AddItem(ItemDefinition itemDefinition, int quantity = 1)
         {
@@ -88,49 +103,24 @@ namespace ROC.Inventory
             {
                 if (verboseLogging)
                 {
-                    Debug.Log($"[PlayerInventory] Cannot accept {quantity}x '{itemDefinition.DisplayName}'.", this);
+                    Debug.Log($"[PlayerInventory] Cannot accept {quantity}x '{itemDefinition.DisplayName}' into bags.", this);
                 }
 
                 return false;
             }
 
-            FixedString64Bytes itemId = new FixedString64Bytes(itemDefinition.ItemId);
+            bool changed = AddToList(_bagItems, itemDefinition.ItemId, quantity);
 
-            for (int i = 0; i < _items.Count; i++)
+            if (changed && verboseLogging)
             {
-                ReplicatedInventoryEntry entry = _items[i];
-                if (!entry.ItemId.Equals(itemId))
-                {
-                    continue;
-                }
-
-                entry.Quantity += quantity;
-                _items[i] = entry;
-
-                if (verboseLogging)
-                {
-                    Debug.Log($"[PlayerInventory] Added {quantity}x '{itemDefinition.DisplayName}'. New quantity = {entry.Quantity}.", this);
-                }
-
-                return true;
+                Debug.Log($"[PlayerInventory] Added {quantity}x '{itemDefinition.DisplayName}' to bags.", this);
             }
 
-            _items.Add(new ReplicatedInventoryEntry
-            {
-                ItemId = itemId,
-                Quantity = quantity
-            });
-
-            if (verboseLogging)
-            {
-                Debug.Log($"[PlayerInventory] Added new item stack {quantity}x '{itemDefinition.DisplayName}'.", this);
-            }
-
-            return true;
+            return changed;
         }
 
         /// <summary>
-        /// Server-only remove item.
+        /// Server-only remove item from BAGS.
         /// </summary>
         public bool RemoveItem(ItemDefinition itemDefinition, int quantity = 1)
         {
@@ -145,12 +135,339 @@ namespace ROC.Inventory
                 return false;
             }
 
-            FixedString64Bytes itemId = new FixedString64Bytes(itemDefinition.ItemId);
+            bool changed = RemoveFromList(_bagItems, itemDefinition.ItemId, quantity);
 
-            for (int i = 0; i < _items.Count; i++)
+            if (changed && verboseLogging)
             {
-                ReplicatedInventoryEntry entry = _items[i];
-                if (!entry.ItemId.Equals(itemId))
+                Debug.Log($"[PlayerInventory] Removed {quantity}x '{itemDefinition.DisplayName}' from bags.", this);
+            }
+
+            return changed;
+        }
+
+        public bool HasItem(ItemDefinition itemDefinition, int minimumQuantity = 1)
+        {
+            return GetQuantity(itemDefinition, InventoryCollection.Bag) >= minimumQuantity;
+        }
+
+        public int GetQuantity(ItemDefinition itemDefinition, InventoryCollection collection = InventoryCollection.Bag)
+        {
+            if (itemDefinition == null)
+            {
+                return 0;
+            }
+
+            return GetQuantityByItemId(itemDefinition.ItemId, collection);
+        }
+
+        public int GetQuantityByItemId(string itemId, InventoryCollection collection = InventoryCollection.Bag)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+            {
+                return 0;
+            }
+
+            NetworkList<ReplicatedInventoryEntry> list = GetList(collection);
+            FixedString64Bytes fixedItemId = new FixedString64Bytes(itemId);
+
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i].ItemId.Equals(fixedItemId))
+                {
+                    return list[i].Quantity;
+                }
+            }
+
+            return 0;
+        }
+
+        // ---------------------------------------------------------------------
+        // Equip / Unequip
+        // ---------------------------------------------------------------------
+
+        /// <summary>
+        /// Local/client entry point for requesting an equip by item ID.
+        /// If running as host/server, executes directly.
+        /// </summary>
+        public void RequestEquipItem(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+            {
+                return;
+            }
+
+            if (IsServer)
+            {
+                EquipItemServer(itemId);
+            }
+            else
+            {
+                RequestEquipItemRpc(itemId);
+            }
+        }
+
+        /// <summary>
+        /// Local/client entry point for requesting an unequip by item ID.
+        /// If running as host/server, executes directly.
+        /// </summary>
+        public void RequestUnequipItem(string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+            {
+                return;
+            }
+
+            if (IsServer)
+            {
+                UnequipItemServer(itemId);
+            }
+            else
+            {
+                RequestUnequipItemRpc(itemId);
+            }
+        }
+
+        [Rpc(SendTo.Server)]
+        private void RequestEquipItemRpc(string itemId)
+        {
+            EquipItemServer(itemId);
+        }
+
+        [Rpc(SendTo.Server)]
+        private void RequestUnequipItemRpc(string itemId)
+        {
+            UnequipItemServer(itemId);
+        }
+
+        /// <summary>
+        /// Server-only equip logic.
+        /// Moves one quantity from bag -> equipped if the item is equippable.
+        /// </summary>
+        private bool EquipItemServer(string itemId)
+        {
+            if (!IsServer)
+            {
+                return false;
+            }
+
+            if (!TryResolveItemDefinition(itemId, out ItemDefinition itemDefinition) || itemDefinition == null)
+            {
+                if (verboseLogging)
+                {
+                    Debug.LogWarning($"[PlayerInventory] Equip failed. Unknown item '{itemId}'.", this);
+                }
+
+                return false;
+            }
+
+            if (!itemDefinition.IsEquippable)
+            {
+                if (verboseLogging)
+                {
+                    Debug.Log($"[PlayerInventory] Equip ignored. '{itemDefinition.DisplayName}' is not equippable.", this);
+                }
+
+                return false;
+            }
+
+            if (GetQuantity(itemDefinition, InventoryCollection.Bag) < 1)
+            {
+                if (verboseLogging)
+                {
+                    Debug.Log($"[PlayerInventory] Equip failed. '{itemDefinition.DisplayName}' is not in bags.", this);
+                }
+
+                return false;
+            }
+
+            bool removedFromBag = RemoveFromList(_bagItems, itemId, 1);
+            if (!removedFromBag)
+            {
+                return false;
+            }
+
+            bool addedToEquipped = AddToList(_equippedItems, itemId, 1);
+
+            if (!addedToEquipped)
+            {
+                // Roll back if something unexpected happened.
+                AddToList(_bagItems, itemId, 1);
+                return false;
+            }
+
+            if (verboseLogging)
+            {
+                Debug.Log($"[PlayerInventory] Equipped '{itemDefinition.DisplayName}'.", this);
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Server-only unequip logic.
+        /// Moves one quantity from equipped -> bag.
+        /// </summary>
+        private bool UnequipItemServer(string itemId)
+        {
+            if (!IsServer)
+            {
+                return false;
+            }
+
+            if (!TryResolveItemDefinition(itemId, out ItemDefinition itemDefinition) || itemDefinition == null)
+            {
+                if (verboseLogging)
+                {
+                    Debug.LogWarning($"[PlayerInventory] Unequip failed. Unknown item '{itemId}'.", this);
+                }
+
+                return false;
+            }
+
+            if (GetQuantity(itemDefinition, InventoryCollection.Equipped) < 1)
+            {
+                if (verboseLogging)
+                {
+                    Debug.Log($"[PlayerInventory] Unequip failed. '{itemDefinition.DisplayName}' is not equipped.", this);
+                }
+
+                return false;
+            }
+
+            if (!CanAcceptItem(itemDefinition, 1))
+            {
+                if (verboseLogging)
+                {
+                    Debug.Log($"[PlayerInventory] Unequip failed. Bags cannot accept '{itemDefinition.DisplayName}'.", this);
+                }
+
+                return false;
+            }
+
+            bool removedFromEquipped = RemoveFromList(_equippedItems, itemId, 1);
+            if (!removedFromEquipped)
+            {
+                return false;
+            }
+
+            bool addedToBag = AddToList(_bagItems, itemId, 1);
+
+            if (!addedToBag)
+            {
+                // Roll back if something unexpected happened.
+                AddToList(_equippedItems, itemId, 1);
+                return false;
+            }
+
+            if (verboseLogging)
+            {
+                Debug.Log($"[PlayerInventory] Unequipped '{itemDefinition.DisplayName}'.", this);
+            }
+
+            return true;
+        }
+
+        // ---------------------------------------------------------------------
+        // UI helper API
+        // ---------------------------------------------------------------------
+
+        public int GetEntryCount(InventoryCollection collection)
+        {
+            return GetList(collection).Count;
+        }
+
+        public bool TryGetDisplayInfoAt(
+            int index,
+            InventoryCollection collection,
+            out string itemId,
+            out string displayName,
+            out int quantity,
+            out bool isEquippable)
+        {
+            itemId = string.Empty;
+            displayName = string.Empty;
+            quantity = 0;
+            isEquippable = false;
+
+            NetworkList<ReplicatedInventoryEntry> list = GetList(collection);
+
+            if (index < 0 || index >= list.Count)
+            {
+                return false;
+            }
+
+            ReplicatedInventoryEntry entry = list[index];
+
+            itemId = entry.ItemId.ToString();
+            quantity = entry.Quantity;
+
+            if (itemCatalog != null && itemCatalog.TryGetDefinition(itemId, out ItemDefinition definition) && definition != null)
+            {
+                displayName = definition.DisplayName;
+                isEquippable = definition.IsEquippable;
+            }
+            else
+            {
+                displayName = itemId;
+                isEquippable = false;
+            }
+
+            return true;
+        }
+
+        // ---------------------------------------------------------------------
+        // Internal helpers
+        // ---------------------------------------------------------------------
+
+        private NetworkList<ReplicatedInventoryEntry> GetList(InventoryCollection collection)
+        {
+            return collection == InventoryCollection.Equipped ? _equippedItems : _bagItems;
+        }
+
+        private bool AddToList(NetworkList<ReplicatedInventoryEntry> list, string itemId, int quantity)
+        {
+            if (string.IsNullOrWhiteSpace(itemId) || quantity <= 0)
+            {
+                return false;
+            }
+
+            FixedString64Bytes fixedItemId = new FixedString64Bytes(itemId);
+
+            for (int i = 0; i < list.Count; i++)
+            {
+                ReplicatedInventoryEntry entry = list[i];
+                if (!entry.ItemId.Equals(fixedItemId))
+                {
+                    continue;
+                }
+
+                entry.Quantity += quantity;
+                list[i] = entry;
+                return true;
+            }
+
+            list.Add(new ReplicatedInventoryEntry
+            {
+                ItemId = fixedItemId,
+                Quantity = quantity
+            });
+
+            return true;
+        }
+
+        private bool RemoveFromList(NetworkList<ReplicatedInventoryEntry> list, string itemId, int quantity)
+        {
+            if (string.IsNullOrWhiteSpace(itemId) || quantity <= 0)
+            {
+                return false;
+            }
+
+            FixedString64Bytes fixedItemId = new FixedString64Bytes(itemId);
+
+            for (int i = 0; i < list.Count; i++)
+            {
+                ReplicatedInventoryEntry entry = list[i];
+                if (!entry.ItemId.Equals(fixedItemId))
                 {
                     continue;
                 }
@@ -164,16 +481,11 @@ namespace ROC.Inventory
 
                 if (entry.Quantity <= 0)
                 {
-                    _items.RemoveAt(i);
+                    list.RemoveAt(i);
                 }
                 else
                 {
-                    _items[i] = entry;
-                }
-
-                if (verboseLogging)
-                {
-                    Debug.Log($"[PlayerInventory] Removed {quantity}x '{itemDefinition.DisplayName}'.", this);
+                    list[i] = entry;
                 }
 
                 return true;
@@ -182,75 +494,19 @@ namespace ROC.Inventory
             return false;
         }
 
-        public bool HasItem(ItemDefinition itemDefinition, int minimumQuantity = 1)
+        private bool TryResolveItemDefinition(string itemId, out ItemDefinition itemDefinition)
         {
-            return GetQuantity(itemDefinition) >= minimumQuantity;
-        }
+            itemDefinition = null;
 
-        public int GetQuantity(ItemDefinition itemDefinition)
-        {
-            if (itemDefinition == null)
-            {
-                return 0;
-            }
-
-            FixedString64Bytes itemId = new FixedString64Bytes(itemDefinition.ItemId);
-
-            for (int i = 0; i < _items.Count; i++)
-            {
-                if (_items[i].ItemId.Equals(itemId))
-                {
-                    return _items[i].Quantity;
-                }
-            }
-
-            return 0;
-        }
-
-        /// <summary>
-        /// Returns the number of replicated inventory entries currently visible locally.
-        /// Useful for simple UI rendering.
-        /// </summary>
-        public int GetEntryCount()
-        {
-            return _items.Count;
-        }
-
-        /// <summary>
-        /// Returns display-friendly information for an entry at a given index.
-        ///
-        /// This works on both server and client because it reads the replicated list.
-        /// If the item definition cannot be resolved through the catalog, the item ID is used as fallback text.
-        /// </summary>
-        public bool TryGetDisplayInfoAt(int index, out string itemId, out string displayName, out int quantity)
-        {
-            itemId = string.Empty;
-            displayName = string.Empty;
-            quantity = 0;
-
-            if (index < 0 || index >= _items.Count)
+            if (itemCatalog == null)
             {
                 return false;
             }
 
-            ReplicatedInventoryEntry entry = _items[index];
-
-            itemId = entry.ItemId.ToString();
-            quantity = entry.Quantity;
-
-            if (itemCatalog != null && itemCatalog.TryGetDefinition(itemId, out ItemDefinition definition) && definition != null)
-            {
-                displayName = definition.DisplayName;
-            }
-            else
-            {
-                displayName = itemId;
-            }
-
-            return true;
+            return itemCatalog.TryGetDefinition(itemId, out itemDefinition);
         }
 
-        private void HandleListChanged(NetworkListEvent<ReplicatedInventoryEntry> changeEvent)
+        private void HandleAnyListChanged(NetworkListEvent<ReplicatedInventoryEntry> changeEvent)
         {
             InventoryChanged?.Invoke();
         }

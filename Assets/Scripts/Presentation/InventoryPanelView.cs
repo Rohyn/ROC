@@ -1,42 +1,45 @@
-using System.Text;
 using TMPro;
 using UnityEngine;
 using ROC.Inventory;
 
 /// <summary>
-/// Very simple persistent inventory panel view.
+/// Inventory tab view with two lists:
+/// - bag items
+/// - equipped items
 ///
-/// RESPONSIBILITIES:
-/// - show / hide the panel
-/// - render the current inventory contents into a TMP text field
+/// This version uses row prefabs instead of a single TMP text block,
+/// because right-click equip/unequip requires per-item UI elements.
 ///
-/// This first pass intentionally uses a single TMP text block rather than a dynamic slot grid.
-/// That keeps the UI simple while you establish the menu flow.
+/// CURRENT INTERACTION:
+/// - right-click an equippable item in the bag list -> request equip
+/// - right-click an item in the equipped list -> request unequip
+///
+/// Non-equippable bag items (like the infirmary key) ignore right-click.
 /// </summary>
 [DisallowMultipleComponent]
 public class InventoryPanelView : MonoBehaviour
 {
-    [Header("UI References")]
-    [Tooltip("Root object for the inventory panel. If left empty, this GameObject is used.")]
+    [Header("Root")]
     [SerializeField] private GameObject panelRoot;
 
-    [Tooltip("Optional title label.")]
+    [Header("Optional Labels")]
     [SerializeField] private TMP_Text titleLabel;
-
-    [Tooltip("TMP text used to list the inventory contents.")]
-    [SerializeField] private TMP_Text contentsLabel;
-
-    [Header("Display")]
-    [Tooltip("Title shown at the top of the panel.")]
     [SerializeField] private string titleText = "Inventory";
 
-    [Tooltip("Text shown when the inventory is empty.")]
-    [SerializeField] private string emptyInventoryText = "Inventory is empty.";
+    [Header("List Containers")]
+    [SerializeField] private Transform bagListContainer;
+    [SerializeField] private Transform equippedListContainer;
 
-    [Tooltip("Text shown when the local player inventory has not been found yet.")]
-    [SerializeField] private string unavailableText = "Inventory unavailable.";
+    [Header("Row Prefab")]
+    [SerializeField] private InventoryItemRowView rowPrefab;
 
-    private readonly StringBuilder _builder = new StringBuilder(256);
+    [Header("Fallback Empty Text")]
+    [SerializeField] private TMP_Text bagEmptyLabel;
+    [SerializeField] private TMP_Text equippedEmptyLabel;
+    [SerializeField] private string emptyBagText = "Bags empty.";
+    [SerializeField] private string emptyEquippedText = "Nothing equipped.";
+
+    private PlayerInventory _boundInventory;
 
     private void Awake()
     {
@@ -75,53 +78,164 @@ public class InventoryPanelView : MonoBehaviour
     }
 
     /// <summary>
-    /// Renders the inventory contents into the TMP text field.
+    /// Rebuilds both bag and equipped item lists from the bound inventory.
     /// </summary>
     public void RenderInventory(PlayerInventory inventory)
     {
-        if (contentsLabel == null)
+        _boundInventory = inventory;
+
+        ClearContainer(bagListContainer);
+        ClearContainer(equippedListContainer);
+
+        if (_boundInventory == null)
         {
+            SetEmptyLabels(true, true);
             return;
         }
 
-        if (inventory == null)
+        BuildBagList();
+        BuildEquippedList();
+    }
+
+    private void BuildBagList()
+    {
+        if (bagListContainer == null || rowPrefab == null || _boundInventory == null)
         {
-            contentsLabel.text = unavailableText;
+            SetBagEmptyLabel(true);
             return;
         }
 
-        int entryCount = inventory.GetEntryCount();
-        if (entryCount <= 0)
-        {
-            contentsLabel.text = emptyInventoryText;
-            return;
-        }
-
-        _builder.Clear();
+        int entryCount = _boundInventory.GetEntryCount(PlayerInventory.InventoryCollection.Bag);
+        SetBagEmptyLabel(entryCount <= 0);
 
         for (int i = 0; i < entryCount; i++)
         {
-            if (!inventory.TryGetDisplayInfoAt(i, out string itemId, out string displayName, out int quantity))
+            if (!_boundInventory.TryGetDisplayInfoAt(
+                i,
+                PlayerInventory.InventoryCollection.Bag,
+                out string itemId,
+                out string displayName,
+                out int quantity,
+                out bool isEquippable))
             {
                 continue;
             }
 
-            _builder.Append(displayName);
+            InventoryItemRowView row = Instantiate(rowPrefab, bagListContainer);
+            row.Bind(
+                itemId,
+                displayName,
+                quantity,
+                isEquippable,
+                InventoryItemRowView.RowCollection.Bag,
+                HandleRowRightClick);
+        }
+    }
 
-            if (quantity > 1)
-            {
-                _builder.Append(" x");
-                _builder.Append(quantity);
-            }
-
-            if (i < entryCount - 1)
-            {
-                _builder.AppendLine();
-            }
+    private void BuildEquippedList()
+    {
+        if (equippedListContainer == null || rowPrefab == null || _boundInventory == null)
+        {
+            SetEquippedEmptyLabel(true);
+            return;
         }
 
-        contentsLabel.text = _builder.Length > 0
-            ? _builder.ToString()
-            : emptyInventoryText;
+        int entryCount = _boundInventory.GetEntryCount(PlayerInventory.InventoryCollection.Equipped);
+        SetEquippedEmptyLabel(entryCount <= 0);
+
+        for (int i = 0; i < entryCount; i++)
+        {
+            if (!_boundInventory.TryGetDisplayInfoAt(
+                i,
+                PlayerInventory.InventoryCollection.Equipped,
+                out string itemId,
+                out string displayName,
+                out int quantity,
+                out bool isEquippable))
+            {
+                continue;
+            }
+
+            InventoryItemRowView row = Instantiate(rowPrefab, equippedListContainer);
+            row.Bind(
+                itemId,
+                displayName,
+                quantity,
+                isEquippable,
+                InventoryItemRowView.RowCollection.Equipped,
+                HandleRowRightClick);
+        }
+    }
+
+    private void HandleRowRightClick(string itemId, InventoryItemRowView.RowCollection rowCollection, bool isEquippable)
+    {
+        if (_boundInventory == null || string.IsNullOrWhiteSpace(itemId))
+        {
+            return;
+        }
+
+        switch (rowCollection)
+        {
+            case InventoryItemRowView.RowCollection.Bag:
+            {
+                // Only equippable bag items respond to right-click equip.
+                if (!isEquippable)
+                {
+                    return;
+                }
+
+                _boundInventory.RequestEquipItem(itemId);
+                break;
+            }
+
+            case InventoryItemRowView.RowCollection.Equipped:
+            {
+                _boundInventory.RequestUnequipItem(itemId);
+                break;
+            }
+        }
+    }
+
+    private void ClearContainer(Transform container)
+    {
+        if (container == null)
+        {
+            return;
+        }
+
+        for (int i = container.childCount - 1; i >= 0; i--)
+        {
+            Destroy(container.GetChild(i).gameObject);
+        }
+    }
+
+    private void SetEmptyLabels(bool bagEmpty, bool equippedEmpty)
+    {
+        SetBagEmptyLabel(bagEmpty);
+        SetEquippedEmptyLabel(equippedEmpty);
+    }
+
+    private void SetBagEmptyLabel(bool isVisible)
+    {
+        if (bagEmptyLabel != null)
+        {
+            bagEmptyLabel.gameObject.SetActive(isVisible);
+            if (isVisible)
+            {
+                bagEmptyLabel.text = emptyBagText;
+            }
+        }
+    }
+
+    private void SetEquippedEmptyLabel(bool isVisible)
+    {
+        if (equippedEmptyLabel != null)
+        {
+            equippedEmptyLabel.gameObject.SetActive(isVisible);
+            if (isVisible)
+            {
+                equippedEmptyLabel.text = emptyEquippedText;
+            }
+        }
     }
 }
