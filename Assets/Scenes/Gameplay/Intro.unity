@@ -275,7 +275,7 @@ Transform:
   m_Children:
   - {fileID: 1340726498}
   - {fileID: 747505134}
-  - {fileID: 590964772}
+  - {fileID: 1154487639}
   m_Father: {fileID: 99902945}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!65 &564487354
@@ -405,7 +405,9 @@ MonoBehaviour:
   interactionPrompt: Interact
   interactionRange: 2.5
   isEnabled: 1
-  interactionFocusPoint: {fileID: 590964772}
+  interactionFocusPoint: {fileID: 1154487639}
+  interactionTargetCollider: {fileID: 564487354}
+  selectionPriorityBonus: 0
 --- !u!114 &564487360
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -422,37 +424,6 @@ MonoBehaviour:
   anchor: {fileID: 1340726498}
   exitAnchor: {fileID: 747505134}
   anchorOwnerOverride: {fileID: 0}
---- !u!1 &590964771
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 590964772}
-  m_Layer: 0
-  m_Name: InteractionFocus
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &590964772
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 590964771}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0.7, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 564487353}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &747505133
 GameObject:
   m_ObjectHideFlags: 0
@@ -769,6 +740,37 @@ MonoBehaviour:
   m_ShadowLayerMask: 1
   m_RenderingLayers: 1
   m_ShadowRenderingLayers: 1
+--- !u!1 &1154487638
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1154487639}
+  m_Layer: 0
+  m_Name: InteractionFocus
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1154487639
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1154487638}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0.6, z: 0.2}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 564487353}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1227297070
 GameObject:
   m_ObjectHideFlags: 0

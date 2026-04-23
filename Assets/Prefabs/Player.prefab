@@ -327,10 +327,13 @@ MonoBehaviour:
   rescoreIntervalSeconds: 0.08
   selectionOriginHeight: 1
   minimumFacingDot: 0
+  closeRangeOverrideDistance: 1
   requireLineOfSight: 1
   lineOfSightBlockers:
     serializedVersion: 2
     m_Bits: 4294967295
+  targetLostGraceSeconds: 0.18
+  switchScoreMargin: 8
   verboseLogging: 1
 --- !u!114 &2750283144078216995
 MonoBehaviour:

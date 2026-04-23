@@ -14,10 +14,12 @@ using Unity.Netcode;
 /// - facing direction
 /// - distance
 /// - optional line of sight
+/// - optional selection priority
 ///
-/// This is intended to support:
-/// - interaction prompts
-/// - pressing E to use the current best target
+/// This version includes:
+/// - support for wide interaction target colliders
+/// - sticky current-target behavior
+/// - close-range override for objects that are right beside the player
 /// </summary>
 [DisallowMultipleComponent]
 public class PlayerInteractionSelector : NetworkBehaviour
@@ -42,12 +44,22 @@ public class PlayerInteractionSelector : NetworkBehaviour
     [Range(-1f, 1f)]
     [SerializeField] private float minimumFacingDot = 0.0f;
 
+    [Tooltip("If the interactable is this close or closer, facing rules are relaxed.")]
+    [SerializeField] private float closeRangeOverrideDistance = 1.0f;
+
     [Header("Line Of Sight")]
     [Tooltip("If true, require a clear line of sight to the candidate.")]
     [SerializeField] private bool requireLineOfSight = true;
 
     [Tooltip("Layers that can block line of sight to interactables.")]
     [SerializeField] private LayerMask lineOfSightBlockers = ~0;
+
+    [Header("Stickiness / Hysteresis")]
+    [Tooltip("How long the current target is allowed to remain selected after momentarily becoming invalid.")]
+    [SerializeField] private float targetLostGraceSeconds = 0.18f;
+
+    [Tooltip("How much better a new candidate must score before replacing the current target.")]
+    [SerializeField] private float switchScoreMargin = 8f;
 
     [Header("Debug")]
     [Tooltip("If true, selection changes will be logged.")]
@@ -56,6 +68,15 @@ public class PlayerInteractionSelector : NetworkBehaviour
     private Transform _cameraTransform;
     private float _nextRescoreTime;
 
+    /// <summary>
+    /// Time when the current target first became invalid.
+    /// Used for grace-period stickiness.
+    /// </summary>
+    private float _currentTargetInvalidSince = -1f;
+
+    /// <summary>
+    /// The interactable currently considered the best candidate.
+    /// </summary>
     public GenericInteractable CurrentTarget { get; private set; }
 
     public event Action<GenericInteractable> CurrentTargetChanged;
@@ -136,6 +157,7 @@ public class PlayerInteractionSelector : NetworkBehaviour
 
         GenericInteractable bestCandidate = null;
         float bestScore = float.NegativeInfinity;
+        float currentTargetScore = float.NegativeInfinity;
 
         IReadOnlyCollection<GenericInteractable> candidates = interactionSensor.NearbyInteractables;
 
@@ -153,6 +175,11 @@ public class PlayerInteractionSelector : NetworkBehaviour
 
             float score = ScoreInteractable(origin, forward, interactable);
 
+            if (interactable == CurrentTarget)
+            {
+                currentTargetScore = score;
+            }
+
             if (score > bestScore)
             {
                 bestScore = score;
@@ -160,46 +187,103 @@ public class PlayerInteractionSelector : NetworkBehaviour
             }
         }
 
-        if (bestCandidate != CurrentTarget)
-        {
-            CurrentTarget = bestCandidate;
+        bool currentTargetIsValid = CurrentTarget != null && currentTargetScore > float.NegativeInfinity;
 
-            if (verboseLogging)
+        if (currentTargetIsValid)
+        {
+            _currentTargetInvalidSince = -1f;
+
+            if (bestCandidate == null || bestCandidate == CurrentTarget)
             {
-                string targetName = CurrentTarget != null ? CurrentTarget.name : "null";
-                Debug.Log($"[PlayerInteractionSelector] Current target changed to '{targetName}'.", this);
+                return;
             }
 
-            CurrentTargetChanged?.Invoke(CurrentTarget);
+            if (bestScore < currentTargetScore + switchScoreMargin)
+            {
+                return;
+            }
+
+            SetCurrentTarget(bestCandidate);
+            return;
         }
+
+        if (CurrentTarget != null && !currentTargetIsValid)
+        {
+            if (_currentTargetInvalidSince < 0f)
+            {
+                _currentTargetInvalidSince = Time.time;
+            }
+
+            float invalidDuration = Time.time - _currentTargetInvalidSince;
+            if (invalidDuration < targetLostGraceSeconds)
+            {
+                return;
+            }
+
+            _currentTargetInvalidSince = -1f;
+            SetCurrentTarget(bestCandidate);
+            return;
+        }
+
+        _currentTargetInvalidSince = -1f;
+        SetCurrentTarget(bestCandidate);
     }
 
     private float ScoreInteractable(Vector3 origin, Vector3 forward, GenericInteractable interactable)
     {
-        Vector3 targetPosition = interactable.InteractionFocusPosition;
-        Vector3 toTarget = targetPosition - origin;
+        // Use the best available point for distance evaluation.
+        Vector3 distancePoint = interactable.GetInteractionEvaluationPoint(origin);
 
-        float distance = toTarget.magnitude;
+        // Use a more stable point for facing / LOS.
+        // This avoids the "closest point is beside me, so I can't interact" problem
+        // on wide objects like beds.
+        Vector3 facingPoint = interactable.InteractionFocusPosition;
+
+        Vector3 toDistancePoint = distancePoint - origin;
+        float distance = toDistancePoint.magnitude;
         if (distance <= 0.001f)
         {
             distance = 0.001f;
         }
 
-        Vector3 directionToTarget = toTarget / distance;
+        // Close-range override:
+        // if the object is very near, do not require strict facing.
+        bool useCloseRangeOverride = distance <= closeRangeOverrideDistance;
 
-        float facingDot = Vector3.Dot(forward, directionToTarget);
-        if (facingDot < minimumFacingDot)
+        if (!useCloseRangeOverride)
         {
-            return float.NegativeInfinity;
+            Vector3 toFacingPoint = facingPoint - origin;
+            float facingDistance = toFacingPoint.magnitude;
+            if (facingDistance <= 0.001f)
+            {
+                facingDistance = 0.001f;
+            }
+
+            Vector3 directionToFacingPoint = toFacingPoint / facingDistance;
+
+            float facingDot = Vector3.Dot(forward, directionToFacingPoint);
+            if (facingDot < minimumFacingDot)
+            {
+                return float.NegativeInfinity;
+            }
+
+            if (requireLineOfSight && !HasLineOfSight(origin, facingPoint, interactable))
+            {
+                return float.NegativeInfinity;
+            }
+
+            return
+                (facingDot * 100f) -
+                (distance * 10f) +
+                interactable.SelectionPriorityBonus;
         }
 
-        if (requireLineOfSight && !HasLineOfSight(origin, targetPosition, interactable))
-        {
-            return float.NegativeInfinity;
-        }
-
-        float score = (facingDot * 100f) - (distance * 10f);
-        return score;
+        // If very close, treat it as eligible even if the facing point is not ideal.
+        // Distance still matters, and we keep the interactable's priority bonus.
+        return
+            (100f) -
+            (distance * 10f) +
+            interactable.SelectionPriorityBonus;
     }
 
     private bool HasLineOfSight(Vector3 origin, Vector3 targetPosition, GenericInteractable candidate)
@@ -227,6 +311,24 @@ public class PlayerInteractionSelector : NetworkBehaviour
         }
 
         return true;
+    }
+
+    private void SetCurrentTarget(GenericInteractable newTarget)
+    {
+        if (newTarget == CurrentTarget)
+        {
+            return;
+        }
+
+        CurrentTarget = newTarget;
+
+        if (verboseLogging)
+        {
+            string targetName = CurrentTarget != null ? CurrentTarget.name : "null";
+            Debug.Log($"[PlayerInteractionSelector] Current target changed to '{targetName}'.", this);
+        }
+
+        CurrentTargetChanged?.Invoke(CurrentTarget);
     }
 
     private Vector3 GetSelectionOrigin()
