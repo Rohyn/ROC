@@ -666,7 +666,7 @@ MonoBehaviour:
   arrivalAnchor: {fileID: 1340726498}
   useArrivalAnchorRotation: 1
   setAnchorStateOnArrival: 1
-  anchorOwnerOverride: {fileID: 564487352}
+  anchorOwnerOverride: {fileID: 1145310277}
   exitAnchor: {fileID: 747505134}
   applyStatusOnArrival: 1
   statusToApplyOnArrival: {fileID: 11400000, guid: 260d98a8d0bb4eb4ab78097862e832b2, type: 2}

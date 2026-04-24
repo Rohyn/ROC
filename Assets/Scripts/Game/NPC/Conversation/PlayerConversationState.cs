@@ -1,25 +1,21 @@
 using System;
 using System.Collections.Generic;
-using UnityEngine;
-using Unity.Netcode;
 using Unity.Collections;
+using Unity.Netcode;
+using UnityEngine;
 
 /// <summary>
 /// Server-authoritative per-player conversation session state.
 ///
-/// FLOW:
-/// - StartConversationAction runs on the server and calls StartConversation(...)
-/// - this component resolves the opening response through the NPC
-/// - server sends the response payload to the owner client
-/// - local UI displays speaker name, response text, and topic buttons
-/// - player selects a topic
-/// - client requests topic resolution from the server
-/// - server resolves and sends updated response back to owner
+/// RESPONSIBILITIES:
+/// - start a conversation with an NPC
+/// - resolve selected topics on the server
+/// - send response payloads to the owner client
+/// - automatically close the conversation if the player moves too far away
 ///
 /// IMPORTANT:
-/// - This component lives on the player prefab
-/// - Conversation is per-player, not globally shared
-/// - This version auto-closes the conversation if the player moves too far away
+/// - lives on the player prefab
+/// - conversation is per-player, not globally shared
 /// </summary>
 [DisallowMultipleComponent]
 [RequireComponent(typeof(NetworkObject))]
@@ -47,7 +43,6 @@ public class PlayerConversationState : NetworkBehaviour
 
     private void Update()
     {
-        // Distance checks must happen on the authoritative server.
         if (!IsServer)
         {
             return;
@@ -62,21 +57,22 @@ public class PlayerConversationState : NetworkBehaviour
         {
             if (verboseLogging)
             {
-                Debug.Log("[PlayerConversationState] Active NPC conversation component is missing. Closing conversation.", this);
+                Debug.Log("[PlayerConversationState] Active NPC conversation is missing. Closing conversation.", this);
             }
 
             CloseConversationServer();
             return;
         }
 
-        float sqrDistance = (_activeNpcConversationServer.transform.position - transform.position).sqrMagnitude;
-        float maxSqrDistance = maxConversationDistance * maxConversationDistance;
+        float maxDistanceSqr = maxConversationDistance * maxConversationDistance;
+        float currentDistanceSqr =
+            (_activeNpcConversationServer.transform.position - transform.position).sqrMagnitude;
 
-        if (sqrDistance > maxSqrDistance)
+        if (currentDistanceSqr > maxDistanceSqr)
         {
             if (verboseLogging)
             {
-                Debug.Log("[PlayerConversationState] Player moved too far away from NPC. Closing conversation.", this);
+                Debug.Log("[PlayerConversationState] Player moved out of conversation range. Closing conversation.", this);
             }
 
             CloseConversationServer();
@@ -84,8 +80,8 @@ public class PlayerConversationState : NetworkBehaviour
     }
 
     /// <summary>
-    /// Server-only start method.
-    /// Called by StartConversationAction once the interaction has succeeded.
+    /// Server-only.
+    /// Called by StartConversationAction after the interaction succeeds.
     /// </summary>
     public void StartConversation(NPCConversationComponent npcConversation)
     {
@@ -101,6 +97,7 @@ public class PlayerConversationState : NetworkBehaviour
         }
 
         _activeNpcConversationServer = npcConversation;
+        IsConversationOpen = true;
 
         NPCConversationResponseData response =
             _activeNpcConversationServer.GetOpeningResponse(gameObject);
@@ -114,7 +111,7 @@ public class PlayerConversationState : NetworkBehaviour
     }
 
     /// <summary>
-    /// Client-side request to select a topic.
+    /// Owner-only request to select a topic.
     /// </summary>
     public void RequestSelectTopic(string topicId)
     {
@@ -134,7 +131,7 @@ public class PlayerConversationState : NetworkBehaviour
     }
 
     /// <summary>
-    /// Client-side request to close the current conversation.
+    /// Owner-only request to close the current conversation.
     /// </summary>
     public void RequestCloseConversation()
     {
@@ -191,6 +188,7 @@ public class PlayerConversationState : NetworkBehaviour
         }
 
         _activeNpcConversationServer = null;
+        IsConversationOpen = false;
         CloseConversationRpc();
 
         if (verboseLogging)

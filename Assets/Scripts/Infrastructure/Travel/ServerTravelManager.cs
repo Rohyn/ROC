@@ -303,15 +303,31 @@ public class ServerTravelManager : MonoBehaviour
             return false;
         }
 
+        SpawnArrivalProfile arrivalProfile = spawnPoint.ArrivalProfile;
+
         Vector3 spawnPosition = spawnPoint.transform.position;
         Quaternion spawnRotation = spawnPoint.UseRotation
             ? spawnPoint.transform.rotation
             : Quaternion.identity;
 
+        if (arrivalProfile != null)
+        {
+            arrivalProfile.GetInitialSpawnPose(
+                spawnPosition,
+                spawnRotation,
+                out spawnPosition,
+                out spawnRotation);
+        }
+
         NetworkObject playerInstance = Instantiate(playerPrefab, spawnPosition, spawnRotation);
         playerInstance.ActiveSceneSynchronization = true;
         playerInstance.SceneMigrationSynchronization = true;
         playerInstance.SpawnAsPlayerObject(clientId, destroyPlayerWithScene);
+
+        if (arrivalProfile != null)
+        {
+            arrivalProfile.ApplyToPlayer(playerInstance.gameObject);
+        }
 
         Debug.Log($"[ServerTravelManager] Spawned player for ClientId {clientId} at {destination}.");
         return true;
