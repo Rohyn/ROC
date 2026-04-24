@@ -25,6 +25,8 @@ public class GenericInteractable : NetworkBehaviour
     [SerializeField] private string interactionPrompt = "Interact";
     [SerializeField] private float interactionRange = 2.5f;
     [SerializeField] private bool isEnabled = true;
+    [Tooltip("Stable identifier used by quests and other systems when this object is interacted with.")]
+    [SerializeField] private string interactableId;
 
     [Header("Selection / Targeting")]
     [Tooltip("Optional focus points used for facing checks, LOS, and prompt placement. The nearest valid one is chosen at runtime.")]
@@ -65,6 +67,7 @@ public class GenericInteractable : NetworkBehaviour
     public bool IsEnabled => isEnabled;
     public float SelectionPriorityBonus => selectionPriorityBonus;
     public Collider InteractionTargetCollider => interactionTargetCollider;
+    public string InteractableId => !string.IsNullOrWhiteSpace(interactableId) ? interactableId : name;
 
     /// <summary>
     /// Backward-compatible convenience property.
@@ -203,6 +206,18 @@ public class GenericInteractable : NetworkBehaviour
         {
             return false;
         }
+        // -------------------------------------------------------------
+        // Area transfer lockout
+        // -------------------------------------------------------------
+        // While the player is in the middle of an area transfer, suppress all
+        // world interactions and prompts.
+        PlayerAreaStreamingController areaStreaming =
+            interactorObject.GetComponent<PlayerAreaStreamingController>();
+
+        if (areaStreaming != null && areaStreaming.IsAreaTransferInProgress)
+        {
+            return false;
+        }
 
         if (_globallyConsumed.Value)
         {
@@ -290,6 +305,14 @@ public class GenericInteractable : NetworkBehaviour
             {
                 break;
             }
+        }
+
+        if (executedAtLeastOneAction)
+        {
+            // Emit a normalized interaction event for quests.
+            QuestEventUtility.EmitToPlayer(
+                context.InteractorObject,
+                GameplayEventData.CreateInteractedWithObjectEvent(InteractableId));
         }
 
         if (executedAtLeastOneAction && consumeOnSuccessfulInteraction)

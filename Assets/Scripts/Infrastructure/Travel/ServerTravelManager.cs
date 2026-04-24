@@ -12,13 +12,11 @@ using Unity.Netcode;
 /// - Load the initial gameplay scene after the dedicated server starts
 /// - Wait for connected clients to fully synchronize into the session
 /// - Manually spawn each client's PlayerObject at a configured destination
+/// - Optionally preload additional gameplay scenes additively
 /// - Provide reusable methods for same-scene teleports and cross-scene transfers
 ///
-/// This version also supports optional SpawnArrivalProfile behavior on SpawnPoints.
-/// That allows cases like:
-/// - spawning directly into a bed/chair anchor
-/// - applying Resting on arrival
-/// - initializing PlayerAnchorState on arrival
+/// This is intended to be a reusable foundation, not an Intro-only script.
+/// The Intro is simply the first configured destination.
 /// </summary>
 [RequireComponent(typeof(NetworkManager))]
 public class ServerTravelManager : MonoBehaviour
@@ -26,6 +24,10 @@ public class ServerTravelManager : MonoBehaviour
     [Header("Initial Flow")]
     [Tooltip("The first networked gameplay destination newly connected players should enter.")]
     [SerializeField] private TravelDestination initialDestination;
+
+    [Header("Preloaded Gameplay Scenes")]
+    [Tooltip("Additional gameplay scenes that should always be loaded additively after the initial scene is ready.")]
+    [SerializeField] private string[] additionalStartupScenes;
 
     [Header("Player Spawning")]
     [Tooltip("The networked player prefab that will be spawned manually for each connected client.")]
@@ -37,8 +39,8 @@ public class ServerTravelManager : MonoBehaviour
     private NetworkManager _networkManager;
     private bool _initialSceneReady;
     private bool _sceneEventsSubscribed;
-
     private readonly HashSet<ulong> _pendingInitialSpawnClients = new();
+    private readonly HashSet<string> _startupScenesRequested = new();
 
     private void Awake()
     {
@@ -118,12 +120,14 @@ public class ServerTravelManager : MonoBehaviour
             Debug.Log("[ServerTravelManager] Subscribed to NetworkSceneManager.OnSceneEvent.");
         }
 
+        // Keep the current synchronization approach.
         _networkManager.SceneManager.SetClientSynchronizationMode(LoadSceneMode.Single);
 
         if (SceneManager.GetActiveScene().name == initialDestination.sceneName)
         {
             _initialSceneReady = true;
             Debug.Log($"[ServerTravelManager] Initial scene already active: {initialDestination.sceneName}");
+            EnsureAdditionalStartupScenesLoaded();
             TrySpawnPendingInitialPlayers();
             return;
         }
@@ -169,6 +173,7 @@ public class ServerTravelManager : MonoBehaviour
                     _initialSceneReady = true;
                     Debug.Log($"[ServerTravelManager] Initial scene '{initialDestination.sceneName}' is ready.");
 
+                    EnsureAdditionalStartupScenesLoaded();
                     TrySpawnPendingInitialPlayers();
                 }
 
@@ -190,6 +195,58 @@ public class ServerTravelManager : MonoBehaviour
                 TrySpawnPendingInitialPlayers();
 
                 break;
+            }
+        }
+    }
+
+    private void EnsureAdditionalStartupScenesLoaded()
+    {
+        if (!_networkManager.IsServer || !_initialSceneReady)
+        {
+            return;
+        }
+
+        if (additionalStartupScenes == null || additionalStartupScenes.Length == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < additionalStartupScenes.Length; i++)
+        {
+            string sceneName = additionalStartupScenes[i];
+
+            if (string.IsNullOrWhiteSpace(sceneName))
+            {
+                continue;
+            }
+
+            if (sceneName == initialDestination.sceneName)
+            {
+                continue;
+            }
+
+            Scene scene = SceneManager.GetSceneByName(sceneName);
+            if (scene.IsValid() && scene.isLoaded)
+            {
+                continue;
+            }
+
+            if (_startupScenesRequested.Contains(sceneName))
+            {
+                continue;
+            }
+
+            SceneEventProgressStatus status =
+                _networkManager.SceneManager.LoadScene(sceneName, LoadSceneMode.Additive);
+
+            if (status == SceneEventProgressStatus.Started)
+            {
+                _startupScenesRequested.Add(sceneName);
+                Debug.Log($"[ServerTravelManager] Loading additional startup scene '{sceneName}' additively.");
+            }
+            else
+            {
+                Debug.LogError($"[ServerTravelManager] Failed to begin loading additional startup scene '{sceneName}'. Status: {status}");
             }
         }
     }
@@ -232,14 +289,6 @@ public class ServerTravelManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Spawns a new PlayerObject for a client at a specific destination.
-    ///
-    /// If the resolved SpawnPoint has a SpawnArrivalProfile, the profile may:
-    /// - override the initial transform
-    /// - initialize PlayerAnchorState
-    /// - apply arrival statuses such as Resting
-    /// </summary>
     public bool SpawnPlayerForClient(ulong clientId, TravelDestination destination)
     {
         if (!_networkManager.IsServer)
@@ -259,32 +308,10 @@ public class ServerTravelManager : MonoBehaviour
             ? spawnPoint.transform.rotation
             : Quaternion.identity;
 
-        SpawnArrivalProfile arrivalProfile = spawnPoint.ArrivalProfile;
-
-        // Let the arrival profile optionally override the player's initial transform.
-        if (arrivalProfile != null)
-        {
-            arrivalProfile.GetInitialSpawnPose(
-                spawnPosition,
-                spawnRotation,
-                out spawnPosition,
-                out spawnRotation);
-        }
-
         NetworkObject playerInstance = Instantiate(playerPrefab, spawnPosition, spawnRotation);
-
-        // These settings make later scene travel easier.
         playerInstance.ActiveSceneSynchronization = true;
         playerInstance.SceneMigrationSynchronization = true;
-
-        // Register this object as the official PlayerObject for the specified client.
         playerInstance.SpawnAsPlayerObject(clientId, destroyPlayerWithScene);
-
-        // Apply any post-spawn arrival behavior on the server.
-        if (arrivalProfile != null)
-        {
-            arrivalProfile.ApplyToPlayer(playerInstance.gameObject);
-        }
 
         Debug.Log($"[ServerTravelManager] Spawned player for ClientId {clientId} at {destination}.");
         return true;

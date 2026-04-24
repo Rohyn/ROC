@@ -45,18 +45,19 @@ GameObject:
   - component: {fileID: 4667214124003231594}
   - component: {fileID: 1538894705637957295}
   - component: {fileID: 8636291666918327823}
+  - component: {fileID: 5149886264844771532}
   - component: {fileID: 8786170909034869728}
+  - component: {fileID: -9072884326607108694}
   - component: {fileID: 2940125702930771596}
   - component: {fileID: 8194632222965225880}
-  - component: {fileID: 4987125017315522936}
   - component: {fileID: 6740206874064545595}
-  - component: {fileID: -9072884326607108694}
-  - component: {fileID: 2635858095395341967}
   - component: {fileID: 2750283144078216995}
-  - component: {fileID: 5149886264844771532}
+  - component: {fileID: 2635858095395341967}
+  - component: {fileID: 4987125017315522936}
   - component: {fileID: -5665974493355275435}
   - component: {fileID: -720844528735070886}
   - component: {fileID: 5590071248939819745}
+  - component: {fileID: 2298514464617016136}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -73,7 +74,7 @@ Transform:
   m_GameObject: {fileID: 9016841355397855405}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 190.30986, y: 0, z: -360.74524}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -210,156 +211,6 @@ MonoBehaviour:
   AutoObjectParentSync: 1
   SyncOwnerTransformWhenParented: 1
   AllowOwnerToParent: 0
---- !u!114 &8786170909034869728
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 9016841355397855405}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 62c981eccf2e11b4284872dbb433cb0f, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::PlayerCameraBootstrap
-  ShowTopMostFoldoutHeaderGroup: 1
-  cameraPivot: {fileID: 1979638916084192685}
-  cameraDistance: 4.5
-  verticalOffset: 0.2
-  sideOffset: 0
-  cameraFieldOfView: 65
-  createCameraIfMissing: 1
---- !u!114 &2940125702930771596
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 9016841355397855405}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 6ac360e4de5f58a418ee4e2341b73faa, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::NetworkPlayerMotor
-  ShowTopMostFoldoutHeaderGroup: 1
-  moveSpeed: 4.5
-  jumpHeight: 1.2
-  gravity: -20
-  groundedStickForce: -2
-  cameraTransformOverride: {fileID: 0}
-  statusManager: {fileID: 8194632222965225880}
-  verboseLogging: 0
---- !u!114 &8194632222965225880
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 9016841355397855405}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 4ad13b5c14f9884418b06a1eff8a3b46, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::ROC.Statuses.StatusManager
-  ShowTopMostFoldoutHeaderGroup: 1
-  statusCatalog: {fileID: 11400000, guid: 10c821ef15175614d92a1f862bbf1481, type: 2}
-  verboseLogging: 1
---- !u!114 &4987125017315522936
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 9016841355397855405}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 9028ae8a08f56e446b4262bdf44e2a4b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::PlayerInteractor
-  ShowTopMostFoldoutHeaderGroup: 1
-  interactionSelector: {fileID: 0}
-  verboseLogging: 1
---- !u!114 &6740206874064545595
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 9016841355397855405}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f53806ead5467f7429a1ac8e2dc9e839, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::PlayerAnchorState
-  verboseLogging: 1
---- !u!114 &-9072884326607108694
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 9016841355397855405}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 05a72ab8d9765cf4280182bd49328ec1, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::PlayerLookController
-  ShowTopMostFoldoutHeaderGroup: 1
-  cameraPivot: {fileID: 1979638916084192685}
-  yawSensitivity: 0.12
-  pitchSensitivity: 0.1
-  minPitch: -35
-  maxPitch: 80
-  invertY: 0
-  toggleFreeCursorKey: 8
-  toggleMenuKey: 3
-  startLockedInGameplay: 1
---- !u!114 &2635858095395341967
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 9016841355397855405}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 67ee3e50a03f6434285d4d3a8d0b4c9b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::PlayerInteractionSelector
-  ShowTopMostFoldoutHeaderGroup: 1
-  interactionSensor: {fileID: 2750283144078216995}
-  cameraTransformOverride: {fileID: 0}
-  rescoreIntervalSeconds: 0.08
-  selectionOriginHeight: 1
-  minimumFacingDot: 0
-  closeRangeOverrideDistance: 1
-  requireLineOfSight: 1
-  lineOfSightBlockers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  targetLostGraceSeconds: 0.18
-  switchScoreMargin: 8
-  verboseLogging: 1
---- !u!114 &2750283144078216995
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 9016841355397855405}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c706bf99be6c740448c04be8f35e0481, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::PlayerInteractionSensor
-  searchRadius: 2.5
-  searchOriginHeight: 0.5
-  refreshIntervalSeconds: 0.08
-  interactableMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  triggerInteraction: 1
-  verboseLogging: 1
 --- !u!114 &5149886264844771532
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -406,6 +257,156 @@ MonoBehaviour:
   SwitchTransformSpaceWhenParented: 0
   Interpolate: 1
   SlerpPosition: 0
+--- !u!114 &8786170909034869728
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 62c981eccf2e11b4284872dbb433cb0f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerCameraBootstrap
+  ShowTopMostFoldoutHeaderGroup: 1
+  cameraPivot: {fileID: 1979638916084192685}
+  cameraDistance: 4.5
+  verticalOffset: 0.2
+  sideOffset: 0
+  cameraFieldOfView: 65
+  createCameraIfMissing: 1
+--- !u!114 &-9072884326607108694
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 05a72ab8d9765cf4280182bd49328ec1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerLookController
+  ShowTopMostFoldoutHeaderGroup: 1
+  cameraPivot: {fileID: 1979638916084192685}
+  yawSensitivity: 0.12
+  pitchSensitivity: 0.1
+  minPitch: -35
+  maxPitch: 80
+  invertY: 0
+  toggleFreeCursorKey: 8
+  toggleMenuKey: 3
+  startLockedInGameplay: 1
+--- !u!114 &2940125702930771596
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6ac360e4de5f58a418ee4e2341b73faa, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NetworkPlayerMotor
+  ShowTopMostFoldoutHeaderGroup: 1
+  moveSpeed: 4.5
+  jumpHeight: 1.2
+  gravity: -20
+  groundedStickForce: -2
+  cameraTransformOverride: {fileID: 0}
+  statusManager: {fileID: 8194632222965225880}
+  verboseLogging: 0
+--- !u!114 &8194632222965225880
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4ad13b5c14f9884418b06a1eff8a3b46, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ROC.Statuses.StatusManager
+  ShowTopMostFoldoutHeaderGroup: 1
+  statusCatalog: {fileID: 11400000, guid: 10c821ef15175614d92a1f862bbf1481, type: 2}
+  verboseLogging: 1
+--- !u!114 &6740206874064545595
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f53806ead5467f7429a1ac8e2dc9e839, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerAnchorState
+  verboseLogging: 1
+--- !u!114 &2750283144078216995
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c706bf99be6c740448c04be8f35e0481, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerInteractionSensor
+  searchRadius: 2.5
+  searchOriginHeight: 0.5
+  refreshIntervalSeconds: 0.08
+  interactableMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  triggerInteraction: 1
+  verboseLogging: 1
+--- !u!114 &2635858095395341967
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 67ee3e50a03f6434285d4d3a8d0b4c9b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerInteractionSelector
+  ShowTopMostFoldoutHeaderGroup: 1
+  interactionSensor: {fileID: 2750283144078216995}
+  cameraTransformOverride: {fileID: 0}
+  rescoreIntervalSeconds: 0.08
+  selectionOriginHeight: 1
+  minimumFacingDot: 0
+  closeRangeOverrideDistance: 1
+  requireLineOfSight: 1
+  lineOfSightBlockers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  targetLostGraceSeconds: 0.18
+  switchScoreMargin: 8
+  verboseLogging: 1
+--- !u!114 &4987125017315522936
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9028ae8a08f56e446b4262bdf44e2a4b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerInteractor
+  ShowTopMostFoldoutHeaderGroup: 1
+  interactionSelector: {fileID: 0}
+  verboseLogging: 1
 --- !u!114 &-5665974493355275435
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -449,4 +450,20 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PlayerConversationState
   ShowTopMostFoldoutHeaderGroup: 1
   maxConversationDistance: 2.5
+  verboseLogging: 1
+--- !u!114 &2298514464617016136
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ebf5f87706c15ed4691994d66c2be0ac, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerAreaStreamingController
+  ShowTopMostFoldoutHeaderGroup: 1
+  initialAreaSceneName: Intro
+  unloadPreviousAreaOnOwner: 1
   verboseLogging: 1

@@ -1,168 +1,92 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.Netcode;
 
 /// <summary>
-/// Maintains a live set of nearby interactables using a throttled OverlapSphere query.
+/// Maintains the local player's current set of nearby interactables.
 ///
-/// WHY THIS VERSION EXISTS:
-/// - Trigger-based sensing is awkward with a CharacterController-driven player unless
-///   the collider setup also includes a Rigidbody somewhere in the interaction pair.
-/// - This polling approach is still efficient because it runs on a light cadence and
-///   only searches a small radius around the player.
-/// - It preserves the "small nearby candidate set" architecture you wanted.
+/// DESIGN:
+/// - Owner-only
+/// - Rebuilds the nearby interactable set from fresh overlap results
+/// - Robust against scene unloads and destroyed interactables
+/// - Clears itself during area transfers so stale references from the old scene
+///   do not survive into the new area
 ///
-/// Attach this directly to the player root.
-/// It does NOT require a trigger collider child object.
+/// This component intentionally does NOT decide which interactable is best.
+/// That is the selector's job.
 /// </summary>
 [DisallowMultipleComponent]
-public class PlayerInteractionSensor : MonoBehaviour
+public class PlayerInteractionSensor : NetworkBehaviour
 {
-    [Header("Search")]
-    [Tooltip("How far from the player to search for nearby interactables.")]
-    [SerializeField] private float searchRadius = 2.5f;
+    [Header("Detection")]
+    [SerializeField] private float detectionRadius = 5f;
 
-    [Tooltip("Vertical offset from the player root used as the center of the search sphere.")]
-    [SerializeField] private float searchOriginHeight = 1.0f;
+    [Tooltip("Physics layers to search for interactable colliders on.")]
+    [SerializeField] private LayerMask detectionMask = ~0;
 
-    [Tooltip("How often the nearby interactable set should be rebuilt, in seconds.")]
-    [SerializeField] private float refreshIntervalSeconds = 0.08f;
+    [Tooltip("How often to rebuild the nearby interactable set.")]
+    [SerializeField] private float refreshIntervalSeconds = 0.05f;
 
-    [Tooltip("Layer mask used to search for possible interactable colliders.")]
-    [SerializeField] private LayerMask interactableMask = ~0;
-
-    [Tooltip("Whether trigger colliders should be included in the search.")]
-    [SerializeField] private QueryTriggerInteraction triggerInteraction = QueryTriggerInteraction.Ignore;
+    [Tooltip("Whether trigger colliders should be considered during overlap checks.")]
+    [SerializeField] private QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.Collide;
 
     [Header("Debug")]
-    [Tooltip("If true, nearby candidate changes will be logged.")]
-    [SerializeField] private bool verboseLogging = false;
+    [SerializeField] private bool verboseLogging = true;
 
-    /// <summary>
-    /// Current nearby interactables.
-    /// </summary>
     private readonly HashSet<GenericInteractable> _nearbyInteractables = new();
-
-    /// <summary>
-    /// Temporary set used while rebuilding the nearby list.
-    /// </summary>
-    private readonly HashSet<GenericInteractable> _rebuildBuffer = new();
-
-    /// <summary>
-    /// Reusable physics buffer to avoid allocations.
-    /// </summary>
-    private readonly Collider[] _overlapResults = new Collider[32];
+    private readonly HashSet<GenericInteractable> _currentFrameInteractables = new();
 
     private float _nextRefreshTime;
 
-    /// <summary>
-    /// Public read-only access to the current nearby interactable set.
-    /// </summary>
-    public IReadOnlyCollection<GenericInteractable> NearbyInteractables => _nearbyInteractables;
-
-    /// <summary>
-    /// Raised whenever the nearby candidate set changes.
-    /// The selector can listen to this to refresh immediately.
-    /// </summary>
     public event Action NearbySetChanged;
 
-    private void Update()
+    public IReadOnlyCollection<GenericInteractable> NearbyInteractables => _nearbyInteractables;
+
+    public override void OnNetworkSpawn()
     {
-        if (Time.time >= _nextRefreshTime)
+        if (!IsOwner)
         {
-            RefreshNearbyInteractables();
-            _nextRefreshTime = Time.time + refreshIntervalSeconds;
+            enabled = false;
+            return;
         }
+
+        _nextRefreshTime = 0f;
     }
 
-    /// <summary>
-    /// Rebuilds the nearby interactable set using OverlapSphereNonAlloc.
-    /// </summary>
-    public void RefreshNearbyInteractables()
+    private void OnDisable()
     {
-        Vector3 origin = transform.position + Vector3.up * searchOriginHeight;
-
-        int hitCount = Physics.OverlapSphereNonAlloc(
-            origin,
-            searchRadius,
-            _overlapResults,
-            interactableMask,
-            triggerInteraction);
-
-        _rebuildBuffer.Clear();
-
-        for (int i = 0; i < hitCount; i++)
+        if (_nearbyInteractables.Count > 0)
         {
-            Collider hit = _overlapResults[i];
-            if (hit == null)
-            {
-                continue;
-            }
-
-            GenericInteractable interactable = hit.GetComponentInParent<GenericInteractable>();
-            if (interactable == null)
-            {
-                continue;
-            }
-
-            _rebuildBuffer.Add(interactable);
-        }
-
-        bool changed = false;
-
-        // Remove things no longer present.
-        List<GenericInteractable> toRemove = null;
-        foreach (GenericInteractable interactable in _nearbyInteractables)
-        {
-            if (_rebuildBuffer.Contains(interactable))
-            {
-                continue;
-            }
-
-            toRemove ??= new List<GenericInteractable>();
-            toRemove.Add(interactable);
-        }
-
-        if (toRemove != null)
-        {
-            for (int i = 0; i < toRemove.Count; i++)
-            {
-                if (verboseLogging)
-                {
-                    Debug.Log($"[PlayerInteractionSensor] Removed nearby interactable '{toRemove[i]?.name}'.", this);
-                }
-
-                _nearbyInteractables.Remove(toRemove[i]);
-                changed = true;
-            }
-        }
-
-        // Add newly present things.
-        foreach (GenericInteractable interactable in _rebuildBuffer)
-        {
-            if (_nearbyInteractables.Add(interactable))
-            {
-                if (verboseLogging)
-                {
-                    Debug.Log($"[PlayerInteractionSensor] Added nearby interactable '{interactable.name}'.", this);
-                }
-
-                changed = true;
-            }
-        }
-
-        if (changed)
-        {
+            _nearbyInteractables.Clear();
             NearbySetChanged?.Invoke();
         }
     }
 
+    private void Update()
+    {
+        if (!IsOwner)
+        {
+            return;
+        }
+
+        if (Time.time < _nextRefreshTime)
+        {
+            return;
+        }
+
+        _nextRefreshTime = Time.time + refreshIntervalSeconds;
+        RefreshNearbyInteractables();
+    }
+
     /// <summary>
-    /// Removes null / destroyed references from the nearby set.
+    /// Removes destroyed/null interactables from the cached set.
+    /// Safe to call from the selector before scoring.
     /// </summary>
     public void CleanupNulls()
     {
         bool changed = false;
+
         List<GenericInteractable> toRemove = null;
 
         foreach (GenericInteractable interactable in _nearbyInteractables)
@@ -191,10 +115,133 @@ public class PlayerInteractionSensor : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Rebuilds the nearby interactable set from a fresh overlap query.
+    /// This is intentionally resilient to scene unloads and destroyed objects.
+    /// </summary>
+    public void RefreshNearbyInteractables()
+    {
+        CleanupNulls();
+
+        PlayerAreaStreamingController areaStreaming = GetComponent<PlayerAreaStreamingController>();
+        if (areaStreaming != null && areaStreaming.IsAreaTransferInProgress)
+        {
+            if (_nearbyInteractables.Count > 0)
+            {
+                if (verboseLogging)
+                {
+                    foreach (GenericInteractable interactable in _nearbyInteractables)
+                    {
+                        if (interactable != null)
+                        {
+                            Debug.Log($"[PlayerInteractionSensor] Removed nearby interactable '{GetSafeInteractableName(interactable)}'.");
+                        }
+                    }
+                }
+
+                _nearbyInteractables.Clear();
+                NearbySetChanged?.Invoke();
+            }
+
+            return;
+        }
+
+        _currentFrameInteractables.Clear();
+
+        Collider[] hits = Physics.OverlapSphere(
+            transform.position,
+            detectionRadius,
+            detectionMask,
+            queryTriggerInteraction);
+
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider hit = hits[i];
+            if (hit == null)
+            {
+                continue;
+            }
+
+            GenericInteractable interactable = hit.GetComponentInParent<GenericInteractable>();
+            if (interactable == null)
+            {
+                continue;
+            }
+
+            if (!interactable.isActiveAndEnabled)
+            {
+                continue;
+            }
+
+            _currentFrameInteractables.Add(interactable);
+        }
+
+        bool changed = false;
+
+        List<GenericInteractable> removedThisFrame = null;
+
+        foreach (GenericInteractable interactable in _nearbyInteractables)
+        {
+            if (interactable != null && _currentFrameInteractables.Contains(interactable))
+            {
+                continue;
+            }
+
+            removedThisFrame ??= new List<GenericInteractable>();
+            removedThisFrame.Add(interactable);
+        }
+
+        if (removedThisFrame != null)
+        {
+            for (int i = 0; i < removedThisFrame.Count; i++)
+            {
+                GenericInteractable interactable = removedThisFrame[i];
+                string interactableName = GetSafeInteractableName(interactable);
+
+                _nearbyInteractables.Remove(interactable);
+                changed = true;
+
+                if (verboseLogging)
+                {
+                    Debug.Log($"[PlayerInteractionSensor] Removed nearby interactable '{interactableName}'.");
+                }
+            }
+        }
+
+        foreach (GenericInteractable interactable in _currentFrameInteractables)
+        {
+            if (interactable == null)
+            {
+                continue;
+            }
+
+            if (_nearbyInteractables.Add(interactable))
+            {
+                changed = true;
+
+                if (verboseLogging)
+                {
+                    Debug.Log($"[PlayerInteractionSensor] Added nearby interactable '{GetSafeInteractableName(interactable)}'.");
+                }
+            }
+        }
+
+        if (changed)
+        {
+            NearbySetChanged?.Invoke();
+        }
+    }
+
+    private string GetSafeInteractableName(GenericInteractable interactable)
+    {
+        return interactable == null ? "<destroyed>" : interactable.name;
+    }
+
+#if UNITY_EDITOR
     private void OnDrawGizmosSelected()
     {
-        Gizmos.color = Color.cyan;
-        Vector3 origin = transform.position + Vector3.up * searchOriginHeight;
-        Gizmos.DrawWireSphere(origin, searchRadius);
+        Gizmos.color = new Color(0.2f, 0.8f, 1f, 0.35f);
+        Gizmos.DrawWireSphere(transform.position, detectionRadius);
     }
+#endif
 }

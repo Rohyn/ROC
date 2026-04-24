@@ -33,6 +33,7 @@ public class NPCIdentityComponent : MonoBehaviour
     public NPCPersonalityProfile Personality => identityData != null
         ? identityData.personality
         : new NPCPersonalityProfile(0f, 0f, 0f, 0f, 0f);
+    public string NpcId => identityData != null ? identityData.npcId : string.Empty;
 
     private void Awake()
     {

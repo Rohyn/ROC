@@ -8,8 +8,11 @@ using UnityEngine;
 /// - NPCConversationComponent
 ///
 /// This action assumes GenericInteractable.TryInteract is already executing on the server.
+///
+/// This version also emits a normalized TalkedToNpc gameplay event into the player's quest log.
 /// </summary>
 [RequireComponent(typeof(NPCConversationComponent))]
+[RequireComponent(typeof(NPCIdentityComponent))]
 public class StartConversationAction : InteractableAction
 {
     [Header("Flow Control")]
@@ -20,10 +23,12 @@ public class StartConversationAction : InteractableAction
     [SerializeField] private bool verboseLogging = true;
 
     private NPCConversationComponent _conversationComponent;
+    private NPCIdentityComponent _identityComponent;
 
     private void Awake()
     {
         _conversationComponent = GetComponent<NPCConversationComponent>();
+        _identityComponent = GetComponent<NPCIdentityComponent>();
     }
 
     public override bool CanExecute(InteractionContext context)
@@ -56,6 +61,14 @@ public class StartConversationAction : InteractableAction
         }
 
         playerConversation.StartConversation(_conversationComponent);
+
+        // Emit a conversation event for quest progress.
+        if (_identityComponent != null && !string.IsNullOrWhiteSpace(_identityComponent.NpcId))
+        {
+            QuestEventUtility.EmitToPlayer(
+                context.InteractorObject,
+                GameplayEventData.CreateTalkedToNpcEvent(_identityComponent.NpcId));
+        }
 
         if (verboseLogging)
         {

@@ -111,9 +111,16 @@ namespace ROC.Inventory
 
             bool changed = AddToList(_bagItems, itemDefinition.ItemId, quantity);
 
-            if (changed && verboseLogging)
+            if (changed)
             {
-                Debug.Log($"[PlayerInventory] Added {quantity}x '{itemDefinition.DisplayName}' to bags.", this);
+                QuestEventUtility.EmitToPlayer(
+                    gameObject,
+                    GameplayEventData.CreateItemAddedEvent(itemDefinition.ItemId, quantity));
+
+                if (verboseLogging)
+                {
+                    Debug.Log($"[PlayerInventory] Added {quantity}x '{itemDefinition.DisplayName}' to bags.", this);
+                }
             }
 
             return changed;
@@ -137,9 +144,16 @@ namespace ROC.Inventory
 
             bool changed = RemoveFromList(_bagItems, itemDefinition.ItemId, quantity);
 
-            if (changed && verboseLogging)
+            if (changed)
             {
-                Debug.Log($"[PlayerInventory] Removed {quantity}x '{itemDefinition.DisplayName}' from bags.", this);
+                QuestEventUtility.EmitToPlayer(
+                    gameObject,
+                    GameplayEventData.CreateItemRemovedEvent(itemDefinition.ItemId, quantity));
+
+                if (verboseLogging)
+                {
+                    Debug.Log($"[PlayerInventory] Removed {quantity}x '{itemDefinition.DisplayName}' from bags.", this);
+                }
             }
 
             return changed;
@@ -308,6 +322,10 @@ namespace ROC.Inventory
                 return false;
             }
 
+            QuestEventUtility.EmitToPlayer(
+                gameObject,
+                GameplayEventData.CreateItemEquippedEvent(itemDefinition.ItemId, 1));
+
             if (verboseLogging)
             {
                 Debug.Log($"[PlayerInventory] Equipped '{itemDefinition.DisplayName}'.", this);
@@ -371,6 +389,10 @@ namespace ROC.Inventory
                 AddToList(_equippedItems, itemId, 1);
                 return false;
             }
+
+            QuestEventUtility.EmitToPlayer(
+                gameObject,
+                GameplayEventData.CreateItemUnequippedEvent(itemDefinition.ItemId, 1));
 
             if (verboseLogging)
             {

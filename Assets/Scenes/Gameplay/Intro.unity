@@ -408,6 +408,7 @@ MonoBehaviour:
   interactionPrompt: Interact
   interactionRange: 2.5
   isEnabled: 1
+  interactableId: 
   interactionFocusPoints:
   - {fileID: 1154487639}
   interactionTargetCollider: {fileID: 564487354}
@@ -839,10 +840,11 @@ GameObject:
   - component: {fileID: 1145310278}
   - component: {fileID: 1145310279}
   - component: {fileID: 1145310282}
+  - component: {fileID: 1145310284}
   - component: {fileID: 1145310281}
   - component: {fileID: 1145310280}
-  - component: {fileID: 1145310284}
   - component: {fileID: 1145310283}
+  - component: {fileID: 1145310285}
   m_Layer: 0
   m_Name: DoorRoot
   m_TagString: Untagged
@@ -948,6 +950,7 @@ MonoBehaviour:
   interactionPrompt: Interact
   interactionRange: 2.5
   isEnabled: 1
+  interactableId: 
   interactionFocusPoints:
   - {fileID: 1543319567}
   interactionTargetCollider: {fileID: 836445750}
@@ -993,6 +996,25 @@ MonoBehaviour:
   requiredEquippedItems:
   - {fileID: 11400000, guid: 7d7f21a6f7c0e1542b877579a8d95b57, type: 2}
   verboseLogging: 0
+--- !u!114 &1145310285
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1145310277}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 27bc42b8bc67ebb4c9f3fa07dd82e2d8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TransferPlayerAction
+  executionOrder: 2
+  destination:
+    sceneName: DKeepCenter
+    spawnPointId: intro_arrival
+  requiredOpenRotationState: {fileID: 1145310281}
+  stopFurtherActionsOnSuccess: 1
+  verboseLogging: 1
 --- !u!1 &1154487638
 GameObject:
   m_ObjectHideFlags: 0
@@ -1421,6 +1443,7 @@ MonoBehaviour:
   interactionPrompt: Interact
   interactionRange: 2.5
   isEnabled: 1
+  interactableId: 
   interactionFocusPoints:
   - {fileID: 1003030519}
   interactionTargetCollider: {fileID: 1637145794}
@@ -1446,6 +1469,7 @@ GameObject:
   - component: {fileID: 1700670230}
   - component: {fileID: 1700670237}
   - component: {fileID: 1700670236}
+  - component: {fileID: 1700670238}
   m_Layer: 0
   m_Name: Aidan
   m_TagString: Untagged
@@ -1631,7 +1655,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 74e48acf1bc2be24eba4562a84ccb546, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::StartConversationAction
-  executionOrder: 0
+  executionOrder: 10
   stopFurtherActions: 1
   verboseLogging: 1
 --- !u!114 &1700670237
@@ -1650,12 +1674,29 @@ MonoBehaviour:
   interactionPrompt: Talk
   interactionRange: 2.5
   isEnabled: 1
+  interactableId: 
   interactionFocusPoints: []
   interactionTargetCollider: {fileID: 1700670232}
   selectionPriorityBonus: 0
   consumeOnSuccessfulInteraction: 0
   consumptionMode: 0
   hidePresentationWhenConsumed: 1
+  verboseLogging: 1
+--- !u!114 &1700670238
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1700670228}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5ddb8fe408388b647b6a99803dad3358, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::GrantQuestAction
+  executionOrder: 0
+  questToGrant: {fileID: 11400000, guid: dd6e0c0a20bbbe142a8e7c5a6a7b86f6, type: 2}
+  stopFurtherActionsOnSuccess: 0
   verboseLogging: 1
 --- !u!1 &1813610882
 GameObject:
@@ -1862,6 +1903,7 @@ MonoBehaviour:
   interactionPrompt: Interact
   interactionRange: 2.5
   isEnabled: 1
+  interactableId: 
   interactionFocusPoints:
   - {fileID: 1813610883}
   interactionTargetCollider: {fileID: 1876646791}
