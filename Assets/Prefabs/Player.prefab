@@ -448,4 +448,5 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerConversationState
   ShowTopMostFoldoutHeaderGroup: 1
+  maxConversationDistance: 2.5
   verboseLogging: 1

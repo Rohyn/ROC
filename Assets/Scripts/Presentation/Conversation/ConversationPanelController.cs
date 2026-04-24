@@ -11,8 +11,10 @@ using UnityEngine;
 /// - switch cursor mode to/from ConversationCursor
 ///
 /// IMPORTANT:
-/// This controller intentionally keeps conversation separate from the menu system.
-/// Conversation uses its own cursor mode so it does not open the inventory menu.
+/// - This version fixes an initialization race where the controller might try to bind
+///   before the local player exists, then wait too long before retrying.
+/// - We now retry EVERY FRAME until both required local references are found.
+/// - Once both are bound, polling stops.
 /// </summary>
 [DisallowMultipleComponent]
 public class ConversationPanelController : MonoBehaviour
@@ -20,15 +22,11 @@ public class ConversationPanelController : MonoBehaviour
     [Header("Required References")]
     [SerializeField] private ConversationPanelView panelView;
 
-    [Header("Binding")]
-    [SerializeField] private float searchIntervalSeconds = 0.5f;
-
     [Header("Debug")]
     [SerializeField] private bool verboseLogging = false;
 
     private PlayerConversationState _boundConversationState;
     private PlayerLookController _boundLookController;
-    private float _nextSearchTime;
 
     private void Awake()
     {
@@ -45,7 +43,7 @@ public class ConversationPanelController : MonoBehaviour
 
     private void OnEnable()
     {
-        TryBindDependencies(force: true);
+        TryBindDependencies();
     }
 
     private void OnDisable()
@@ -60,10 +58,10 @@ public class ConversationPanelController : MonoBehaviour
 
     private void Update()
     {
-        if (Time.time >= _nextSearchTime)
+        // Keep retrying every frame until both dependencies are bound.
+        if (_boundConversationState == null || _boundLookController == null)
         {
-            TryBindDependencies(force: false);
-            _nextSearchTime = Time.time + searchIntervalSeconds;
+            TryBindDependencies();
         }
     }
 
@@ -75,9 +73,9 @@ public class ConversationPanelController : MonoBehaviour
         }
     }
 
-    private void TryBindDependencies(bool force)
+    private void TryBindDependencies()
     {
-        if (force || _boundConversationState == null)
+        if (_boundConversationState == null)
         {
             PlayerConversationState[] states =
                 FindObjectsByType<PlayerConversationState>(FindObjectsSortMode.None);
@@ -95,7 +93,7 @@ public class ConversationPanelController : MonoBehaviour
             }
         }
 
-        if (force || _boundLookController == null)
+        if (_boundLookController == null)
         {
             PlayerLookController[] lookControllers =
                 FindObjectsByType<PlayerLookController>(FindObjectsSortMode.None);
@@ -115,6 +113,9 @@ public class ConversationPanelController : MonoBehaviour
                     Debug.Log("[ConversationPanelController] Bound local PlayerLookController.");
                 }
 
+                // If a conversation was already open before the look controller was found,
+                // refresh now so cursor mode can be corrected immediately.
+                RefreshConversationPanel();
                 break;
             }
         }
@@ -137,6 +138,9 @@ public class ConversationPanelController : MonoBehaviour
             Debug.Log("[ConversationPanelController] Bound local PlayerConversationState.");
         }
 
+        // IMPORTANT:
+        // If the player already has an open conversation when we finally bind,
+        // this immediately shows the panel instead of waiting for another interaction.
         RefreshConversationPanel();
     }
 
@@ -205,6 +209,8 @@ public class ConversationPanelController : MonoBehaviour
 
             buttonView.Bind(topic.topicId, topic.displayName, HandleTopicClicked);
         }
+        // Force a layout rebuild after populating dynamic topic buttons.
+        panelView.ForceImmediateLayoutRebuild();
     }
 
     private void HandleTopicClicked(string topicId)

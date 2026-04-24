@@ -192,6 +192,18 @@ public class GenericInteractable : NetworkBehaviour
             return false;
         }
 
+        // -------------------------------------------------------------
+        // Conversation lockout
+        // -------------------------------------------------------------
+        // While the player is already in a conversation, all world interaction
+        // should be suppressed. This prevents prompts/selection from feeling weird
+        // and avoids repeated E presses on nearby objects or the same NPC.
+        PlayerConversationState conversationState = interactorObject.GetComponent<PlayerConversationState>();
+        if (conversationState != null && conversationState.IsConversationOpen)
+        {
+            return false;
+        }
+
         if (_globallyConsumed.Value)
         {
             return false;
