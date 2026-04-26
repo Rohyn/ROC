@@ -17,6 +17,9 @@ using UnityEngine.SceneManagement;
 /// This manager is intentionally separate from ServerTravelManager.
 /// ServerTravelManager still handles the initial synchronized spawn into Intro.
 /// This manager handles post-spawn per-player area streaming.
+///
+/// This version includes the owner-finalization teleport payload, so the owner client
+/// is explicitly snapped to the same spawn point position/rotation the server resolved.
 /// </summary>
 [DisallowMultipleComponent]
 public class SceneStreamingManager : MonoBehaviour
@@ -147,6 +150,7 @@ public class SceneStreamingManager : MonoBehaviour
             ? spawnPoint.transform.rotation
             : playerController.transform.rotation;
 
+        // Move the authoritative/server-side player object.
         playerController.transform.SetPositionAndRotation(
             spawnPoint.transform.position,
             rotationToUse);
@@ -159,13 +163,18 @@ public class SceneStreamingManager : MonoBehaviour
             DecrementServerAreaUsage(previousAreaSceneName);
         }
 
+        // IMPORTANT:
+        // Send the resolved destination pose to the owner so the local player transform
+        // is explicitly snapped to the same spawn point after area load completes.
         playerController.FinalizeOwnerTransfer(
             destinationSceneName,
-            previousAreaSceneName);
+            previousAreaSceneName,
+            spawnPoint.transform.position,
+            rotationToUse);
 
         if (verboseLogging)
         {
-            Debug.Log($"[SceneStreamingManager] Completed transfer for player '{playerController.name}' to {destination}.");
+            Debug.Log($"[SceneStreamingManager] Completed transfer for player '{playerController.name}' to {destination} at {spawnPoint.transform.position}.");
         }
     }
 

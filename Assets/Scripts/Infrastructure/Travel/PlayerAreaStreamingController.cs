@@ -13,9 +13,9 @@ using Unity.Netcode;
 /// - Lets the server keep an authoritative "current area scene" per player
 ///
 /// IMPORTANT:
-/// This batch keeps the player object itself out of the streamed scenes by moving it
-/// into DontDestroyOnLoad on each peer. This avoids relying on automatic scene migration
-/// for the player object during custom/manual area streaming.
+/// This version also supports owner-side teleport finalization, so when the server
+/// resolves a destination spawn point, the owner client is explicitly snapped to
+/// that same position/rotation after the destination scene loads locally.
 /// </summary>
 [DisallowMultipleComponent]
 [RequireComponent(typeof(NetworkObject))]
@@ -49,7 +49,6 @@ public class PlayerAreaStreamingController : NetworkBehaviour
 
     public override void OnNetworkSpawn()
     {
-        // Keep the player object persistent across streamed scene unloads.
         DontDestroyOnLoad(gameObject);
 
         // We are not relying on automatic scene migration for this streamed-area model.
@@ -143,9 +142,18 @@ public class PlayerAreaStreamingController : NetworkBehaviour
             unloadPreviousAreaOnOwner);
     }
 
-    public void FinalizeOwnerTransfer(string newAreaSceneName, string previousAreaSceneName)
+    public void FinalizeOwnerTransfer(
+        string newAreaSceneName,
+        string previousAreaSceneName,
+        Vector3 destinationPosition,
+        Quaternion destinationRotation)
     {
-        FinalizeOwnerTransferRpc(newAreaSceneName, previousAreaSceneName, unloadPreviousAreaOnOwner);
+        FinalizeOwnerTransferRpc(
+            newAreaSceneName,
+            previousAreaSceneName,
+            unloadPreviousAreaOnOwner,
+            destinationPosition,
+            destinationRotation);
     }
 
     public void AbortTransferOnOwner()
@@ -164,15 +172,13 @@ public class PlayerAreaStreamingController : NetworkBehaviour
         StartCoroutine(LoadAreaSceneForOwnerRoutine(
             destinationSceneName,
             previousAreaSceneName,
-            spawnPointId,
-            shouldUnloadPreviousArea));
+            spawnPointId));
     }
 
     private IEnumerator LoadAreaSceneForOwnerRoutine(
         string destinationSceneName,
         string previousAreaSceneName,
-        string spawnPointId,
-        bool shouldUnloadPreviousArea)
+        string spawnPointId)
     {
         if (!string.IsNullOrWhiteSpace(destinationSceneName))
         {
@@ -228,18 +234,24 @@ public class PlayerAreaStreamingController : NetworkBehaviour
     private void FinalizeOwnerTransferRpc(
         string newAreaSceneName,
         string previousAreaSceneName,
-        bool shouldUnloadPreviousArea)
+        bool shouldUnloadPreviousArea,
+        Vector3 destinationPosition,
+        Quaternion destinationRotation)
     {
         StartCoroutine(FinalizeOwnerTransferRoutine(
             newAreaSceneName,
             previousAreaSceneName,
-            shouldUnloadPreviousArea));
+            shouldUnloadPreviousArea,
+            destinationPosition,
+            destinationRotation));
     }
 
     private IEnumerator FinalizeOwnerTransferRoutine(
         string newAreaSceneName,
         string previousAreaSceneName,
-        bool shouldUnloadPreviousArea)
+        bool shouldUnloadPreviousArea,
+        Vector3 destinationPosition,
+        Quaternion destinationRotation)
     {
         _currentAreaSceneName = newAreaSceneName;
 
@@ -247,6 +259,21 @@ public class PlayerAreaStreamingController : NetworkBehaviour
         if (newScene.IsValid() && newScene.isLoaded)
         {
             SceneManager.SetActiveScene(newScene);
+        }
+
+        // Teleport locally on the owner so the client's transform matches the
+        // server-resolved destination spawn point.
+        CharacterController characterController = GetComponent<CharacterController>();
+        if (characterController != null)
+        {
+            characterController.enabled = false;
+        }
+
+        transform.SetPositionAndRotation(destinationPosition, destinationRotation);
+
+        if (characterController != null)
+        {
+            characterController.enabled = true;
         }
 
         if (shouldUnloadPreviousArea &&
@@ -271,7 +298,7 @@ public class PlayerAreaStreamingController : NetworkBehaviour
 
         if (verboseLogging)
         {
-            Debug.Log($"[PlayerAreaStreamingController] Owner finalized area transfer into '{newAreaSceneName}'.", this);
+            Debug.Log($"[PlayerAreaStreamingController] Owner finalized area transfer into '{newAreaSceneName}' at {destinationPosition}.", this);
         }
     }
 
