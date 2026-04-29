@@ -151,9 +151,22 @@ public class SceneStreamingManager : MonoBehaviour
             : playerController.transform.rotation;
 
         // Move the authoritative/server-side player object.
+        // Disable CharacterController during teleport so it does not interfere
+        // with the transform snap.
+        CharacterController characterController = playerController.GetComponent<CharacterController>();
+        if (characterController != null)
+        {
+            characterController.enabled = false;
+        }
+
         playerController.transform.SetPositionAndRotation(
             spawnPoint.transform.position,
             rotationToUse);
+
+        if (characterController != null)
+        {
+            characterController.enabled = true;
+        }
 
         playerController.CompleteServerTransfer(destinationSceneName);
 
@@ -175,6 +188,7 @@ public class SceneStreamingManager : MonoBehaviour
         if (verboseLogging)
         {
             Debug.Log($"[SceneStreamingManager] Completed transfer for player '{playerController.name}' to {destination} at {spawnPoint.transform.position}.");
+            Debug.Log($"[SceneStreamingManager] Server authoritative player position after teleport: {playerController.transform.position}");
         }
     }
 

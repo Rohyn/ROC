@@ -299,6 +299,7 @@ public class PlayerAreaStreamingController : NetworkBehaviour
         if (verboseLogging)
         {
             Debug.Log($"[PlayerAreaStreamingController] Owner finalized area transfer into '{newAreaSceneName}' at {destinationPosition}.", this);
+            Debug.Log($"[PlayerAreaStreamingController] Owner local player position after teleport: {transform.position}");
         }
     }
 
