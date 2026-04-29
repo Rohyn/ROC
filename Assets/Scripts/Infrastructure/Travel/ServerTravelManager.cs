@@ -1,22 +1,19 @@
 using System.Collections.Generic;
+using ROC.Persistence;
+using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using Unity.Netcode;
 
 /// <summary>
 /// Server-authoritative travel and spawning service.
 ///
 /// Attach this to AppRoot alongside the NetworkManager.
 ///
-/// Responsibilities:
-/// - Load the initial gameplay scene after the dedicated server starts
-/// - Wait for connected clients to fully synchronize into the session
-/// - Manually spawn each client's PlayerObject at a configured destination
-/// - Optionally preload additional gameplay scenes additively
-/// - Provide reusable methods for same-scene teleports and cross-scene transfers
-///
-/// This is intended to be a reusable foundation, not an Intro-only script.
-/// The Intro is simply the first configured destination.
+/// Persistence behavior:
+/// - New characters receive the configured initial SpawnArrivalProfile.
+/// - Returning characters load their saved state through PlayerPersistenceRoot
+///   and skip the initial SpawnArrivalProfile.
+/// - Player objects are persistent. Area scenes stream around them.
 /// </summary>
 [RequireComponent(typeof(NetworkManager))]
 public class ServerTravelManager : MonoBehaviour
@@ -39,6 +36,7 @@ public class ServerTravelManager : MonoBehaviour
     private NetworkManager _networkManager;
     private bool _initialSceneReady;
     private bool _sceneEventsSubscribed;
+
     private readonly HashSet<ulong> _pendingInitialSpawnClients = new();
     private readonly HashSet<string> _startupScenesRequested = new();
 
@@ -64,7 +62,6 @@ public class ServerTravelManager : MonoBehaviour
         {
             Debug.LogError("[ServerTravelManager] Initial destination is not configured.");
             enabled = false;
-            return;
         }
     }
 
@@ -117,16 +114,18 @@ public class ServerTravelManager : MonoBehaviour
         {
             _networkManager.SceneManager.OnSceneEvent += HandleSceneEvent;
             _sceneEventsSubscribed = true;
+
             Debug.Log("[ServerTravelManager] Subscribed to NetworkSceneManager.OnSceneEvent.");
         }
 
-        // Keep the current synchronization approach.
         _networkManager.SceneManager.SetClientSynchronizationMode(LoadSceneMode.Single);
 
         if (SceneManager.GetActiveScene().name == initialDestination.sceneName)
         {
             _initialSceneReady = true;
+
             Debug.Log($"[ServerTravelManager] Initial scene already active: {initialDestination.sceneName}");
+
             EnsureAdditionalStartupScenesLoaded();
             TrySpawnPendingInitialPlayers();
             return;
@@ -139,7 +138,8 @@ public class ServerTravelManager : MonoBehaviour
 
         if (status != SceneEventProgressStatus.Started)
         {
-            Debug.LogError($"[ServerTravelManager] Failed to begin loading initial scene. Status: {status}");
+            Debug.LogError(
+                $"[ServerTravelManager] Failed to begin loading initial scene. Status: {status}");
         }
     }
 
@@ -150,7 +150,8 @@ public class ServerTravelManager : MonoBehaviour
             return;
         }
 
-        Debug.Log($"[ServerTravelManager] Scene event received. Type={sceneEvent.SceneEventType}, Scene={sceneEvent.SceneName}, ClientId={sceneEvent.ClientId}");
+        Debug.Log(
+            $"[ServerTravelManager] Scene event received. Type={sceneEvent.SceneEventType}, Scene={sceneEvent.SceneName}, ClientId={sceneEvent.ClientId}");
 
         switch (sceneEvent.SceneEventType)
         {
@@ -167,10 +168,12 @@ public class ServerTravelManager : MonoBehaviour
                     }
                     else
                     {
-                        Debug.LogWarning($"[ServerTravelManager] Scene '{initialDestination.sceneName}' was reported loaded, but could not be resolved as a valid loaded scene.");
+                        Debug.LogWarning(
+                            $"[ServerTravelManager] Scene '{initialDestination.sceneName}' was reported loaded, but could not be resolved as a valid loaded scene.");
                     }
 
                     _initialSceneReady = true;
+
                     Debug.Log($"[ServerTravelManager] Initial scene '{initialDestination.sceneName}' is ready.");
 
                     EnsureAdditionalStartupScenesLoaded();
@@ -226,6 +229,7 @@ public class ServerTravelManager : MonoBehaviour
             }
 
             Scene scene = SceneManager.GetSceneByName(sceneName);
+
             if (scene.IsValid() && scene.isLoaded)
             {
                 continue;
@@ -242,25 +246,28 @@ public class ServerTravelManager : MonoBehaviour
             if (status == SceneEventProgressStatus.Started)
             {
                 _startupScenesRequested.Add(sceneName);
+
                 Debug.Log($"[ServerTravelManager] Loading additional startup scene '{sceneName}' additively.");
             }
             else
             {
-                Debug.LogError($"[ServerTravelManager] Failed to begin loading additional startup scene '{sceneName}'. Status: {status}");
+                Debug.LogError(
+                    $"[ServerTravelManager] Failed to begin loading additional startup scene '{sceneName}'. Status: {status}");
             }
         }
     }
 
     private void TrySpawnPendingInitialPlayers()
     {
-        Debug.Log($"[ServerTravelManager] TrySpawnPendingInitialPlayers called. initialSceneReady={_initialSceneReady}, pendingCount={_pendingInitialSpawnClients.Count}");
+        Debug.Log(
+            $"[ServerTravelManager] TrySpawnPendingInitialPlayers called. initialSceneReady={_initialSceneReady}, pendingCount={_pendingInitialSpawnClients.Count}");
 
         if (!_initialSceneReady || _pendingInitialSpawnClients.Count == 0)
         {
             return;
         }
 
-        List<ulong> handledClients = new();
+        List<ulong> handledClients = new List<ulong>();
 
         foreach (ulong clientId in _pendingInitialSpawnClients)
         {
@@ -277,6 +284,7 @@ public class ServerTravelManager : MonoBehaviour
             }
 
             bool spawned = SpawnPlayerForClient(clientId, initialDestination);
+
             if (spawned)
             {
                 handledClients.Add(clientId);
@@ -306,9 +314,7 @@ public class ServerTravelManager : MonoBehaviour
         SpawnArrivalProfile arrivalProfile = spawnPoint.ArrivalProfile;
 
         Vector3 spawnPosition = spawnPoint.transform.position;
-        Quaternion spawnRotation = spawnPoint.UseRotation
-            ? spawnPoint.transform.rotation
-            : Quaternion.identity;
+        Quaternion spawnRotation = spawnPoint.UseRotation ? spawnPoint.transform.rotation : Quaternion.identity;
 
         if (arrivalProfile != null)
         {
@@ -320,16 +326,29 @@ public class ServerTravelManager : MonoBehaviour
         }
 
         NetworkObject playerInstance = Instantiate(playerPrefab, spawnPosition, spawnRotation);
-        playerInstance.ActiveSceneSynchronization = true;
-        playerInstance.SceneMigrationSynchronization = true;
+
+        playerInstance.ActiveSceneSynchronization = false;
+        playerInstance.SceneMigrationSynchronization = false;
+
         playerInstance.SpawnAsPlayerObject(clientId, destroyPlayerWithScene);
 
-        if (arrivalProfile != null)
+        PlayerPersistenceRoot persistenceRoot = playerInstance.GetComponent<PlayerPersistenceRoot>();
+        bool isReturningCharacter = persistenceRoot != null && persistenceRoot.LoadedExistingCharacter;
+
+        if (!isReturningCharacter && arrivalProfile != null)
         {
             arrivalProfile.ApplyToPlayer(playerInstance.gameObject);
+
+            Debug.Log($"[ServerTravelManager] Applied initial arrival profile for new character on ClientId {clientId}.");
+        }
+        else if (isReturningCharacter)
+        {
+            Debug.Log(
+                $"[ServerTravelManager] Skipped initial arrival profile for returning character on ClientId {clientId}. SavedScene='{persistenceRoot.LoadedCharacterSceneId}'.");
         }
 
         Debug.Log($"[ServerTravelManager] Spawned player for ClientId {clientId} at {destination}.");
+
         return true;
     }
 
@@ -351,7 +370,8 @@ public class ServerTravelManager : MonoBehaviour
 
         if (!TryFindSpawnPointInScene(currentScene, spawnPointId, out SpawnPoint spawnPoint))
         {
-            Debug.LogError($"[ServerTravelManager] Could not find spawn point '{spawnPointId}' in scene '{currentScene.name}'.");
+            Debug.LogError(
+                $"[ServerTravelManager] Could not find spawn point '{spawnPointId}' in scene '{currentScene.name}'.");
             return false;
         }
 
@@ -363,7 +383,9 @@ public class ServerTravelManager : MonoBehaviour
             spawnPoint.transform.position,
             rotationToUse);
 
-        Debug.Log($"[ServerTravelManager] Teleported player {playerObject.OwnerClientId} within scene '{currentScene.name}' to '{spawnPointId}'.");
+        Debug.Log(
+            $"[ServerTravelManager] Teleported player {playerObject.OwnerClientId} within scene '{currentScene.name}' to '{spawnPointId}'.");
+
         return true;
     }
 
@@ -387,10 +409,6 @@ public class ServerTravelManager : MonoBehaviour
             return false;
         }
 
-        Scene destinationScene = spawnPoint.gameObject.scene;
-
-        SceneManager.MoveGameObjectToScene(playerObject.gameObject, destinationScene);
-
         Quaternion rotationToUse = spawnPoint.UseRotation
             ? spawnPoint.transform.rotation
             : playerObject.transform.rotation;
@@ -400,6 +418,7 @@ public class ServerTravelManager : MonoBehaviour
             rotationToUse);
 
         Debug.Log($"[ServerTravelManager] Transferred player {playerObject.OwnerClientId} to {destination}.");
+
         return true;
     }
 
@@ -421,6 +440,11 @@ public class ServerTravelManager : MonoBehaviour
     private bool TryFindSpawnPointInScene(Scene scene, string spawnPointId, out SpawnPoint spawnPoint)
     {
         spawnPoint = null;
+
+        if (!scene.IsValid() || !scene.isLoaded)
+        {
+            return false;
+        }
 
         GameObject[] rootObjects = scene.GetRootGameObjects();
 

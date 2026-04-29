@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using ROC.Inventory;
 using Unity.Netcode;
@@ -33,19 +34,28 @@ namespace ROC.Persistence
         private PlayerAccountState _accountState;
         private PlayerInventory _inventory;
         private global::PlayerProgressState _progressState;
+        private global::PlayerAreaStreamingController _areaStreamingController;
 
         private string _activeAccountId;
         private string _activeCharacterId;
 
+        private string _loadedCharacterSceneId;
+        private bool _loadedExistingCharacter;
         private bool _loaded;
         private bool _saveQueued;
+        private bool _appliedLoadedAreaToStreamingController;
         private float _nextSaveTime;
+
+        public bool IsLoaded => _loaded;
+        public bool LoadedExistingCharacter => _loadedExistingCharacter;
+        public string LoadedCharacterSceneId => _loadedCharacterSceneId;
 
         private void Awake()
         {
             _accountState = GetComponent<PlayerAccountState>();
             _inventory = GetComponent<PlayerInventory>();
             _progressState = GetComponent<global::PlayerProgressState>();
+            _areaStreamingController = GetComponent<global::PlayerAreaStreamingController>();
         }
 
         public override void OnNetworkSpawn()
@@ -59,8 +69,9 @@ namespace ROC.Persistence
 
             ResolveDevIdentity();
             LoadOrCreateState();
-
             SubscribeToStateEvents();
+
+            StartCoroutine(ApplyLoadedAreaWhenReady());
 
             if (saveOnSpawnAfterLoad)
             {
@@ -122,7 +133,9 @@ namespace ROC.Persistence
 
             if (verboseLogging)
             {
-                Debug.Log($"[PlayerPersistenceRoot] Saved account '{_activeAccountId}' and character '{_activeCharacterId}'.", this);
+                Debug.Log(
+                    $"[PlayerPersistenceRoot] Saved account '{_activeAccountId}' and character '{_activeCharacterId}'.",
+                    this);
             }
         }
 
@@ -145,14 +158,22 @@ namespace ROC.Persistence
             AccountSaveData account = LoadOrCreateAccount();
             CharacterSaveData character = LoadOrCreateCharacter(account);
 
-            _accountState.ApplyLoadedDataServer(account);
+            if (_accountState != null)
+            {
+                _accountState.ApplyLoadedDataServer(account);
+            }
+
             ApplyCharacterData(character);
 
             _loaded = true;
 
             if (verboseLogging)
             {
-                Debug.Log($"[PlayerPersistenceRoot] Loaded account '{_activeAccountId}' and character '{_activeCharacterId}'.", this);
+                string characterKind = _loadedExistingCharacter ? "existing" : "new";
+
+                Debug.Log(
+                    $"[PlayerPersistenceRoot] Loaded {characterKind} account '{_activeAccountId}' and character '{_activeCharacterId}'. Scene='{_loadedCharacterSceneId}'.",
+                    this);
             }
         }
 
@@ -179,18 +200,25 @@ namespace ROC.Persistence
         {
             if (_saveStore.TryLoadCharacter(_activeCharacterId, out CharacterSaveData character) && character != null)
             {
+                _loadedExistingCharacter = true;
+                _loadedCharacterSceneId = character.SceneId;
                 return character;
             }
 
-            return new CharacterSaveData
+            _loadedExistingCharacter = false;
+
+            character = new CharacterSaveData
             {
                 CharacterId = _activeCharacterId,
                 AccountId = account.AccountId,
                 CharacterName = defaultCharacterName,
-                SceneId = SceneManager.GetActiveScene().name,
+                SceneId = GetCurrentSceneIdForSave(),
                 Position = new SerializableVector3(transform.position),
                 Yaw = transform.eulerAngles.y
             };
+
+            _loadedCharacterSceneId = character.SceneId;
+            return character;
         }
 
         private void ApplyCharacterData(CharacterSaveData character)
@@ -199,6 +227,8 @@ namespace ROC.Persistence
             {
                 return;
             }
+
+            _loadedCharacterSceneId = character.SceneId;
 
             ApplyTransform(character);
 
@@ -215,10 +245,16 @@ namespace ROC.Persistence
 
         private void ApplyTransform(CharacterSaveData character)
         {
+            if (character == null)
+            {
+                return;
+            }
+
             Vector3 position = character.Position.ToVector3();
             Quaternion rotation = Quaternion.Euler(0f, character.Yaw, 0f);
 
             CharacterController controller = GetComponent<CharacterController>();
+
             if (controller != null)
             {
                 controller.enabled = false;
@@ -229,13 +265,89 @@ namespace ROC.Persistence
             {
                 transform.SetPositionAndRotation(position, rotation);
             }
+
+            if (verboseLogging)
+            {
+                Debug.Log(
+                    $"[PlayerPersistenceRoot] Applied saved transform. Position={transform.position}, Yaw={character.Yaw:F1}.",
+                    this);
+            }
+        }
+
+        private IEnumerator ApplyLoadedAreaWhenReady()
+        {
+            if (!IsServer)
+            {
+                yield break;
+            }
+
+            const int maxFramesToWait = 10;
+
+            for (int i = 0; i < maxFramesToWait; i++)
+            {
+                if (TryApplyLoadedAreaToStreamingController())
+                {
+                    yield break;
+                }
+
+                yield return null;
+            }
+
+            if (verboseLogging && _loadedExistingCharacter && !_appliedLoadedAreaToStreamingController)
+            {
+                Debug.LogWarning(
+                    $"[PlayerPersistenceRoot] Could not apply loaded area '{_loadedCharacterSceneId}' to PlayerAreaStreamingController after waiting.",
+                    this);
+            }
+        }
+
+        private bool TryApplyLoadedAreaToStreamingController()
+        {
+            if (!IsServer || !_loaded || _appliedLoadedAreaToStreamingController)
+            {
+                return false;
+            }
+
+            if (!_loadedExistingCharacter)
+            {
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(_loadedCharacterSceneId))
+            {
+                return false;
+            }
+
+            if (_areaStreamingController == null)
+            {
+                _areaStreamingController = GetComponent<global::PlayerAreaStreamingController>();
+            }
+
+            if (_areaStreamingController == null)
+            {
+                return false;
+            }
+
+            if (!_areaStreamingController.HasInitializedAreaState)
+            {
+                return false;
+            }
+
+            _areaStreamingController.SetCurrentAreaFromPersistenceServer(_loadedCharacterSceneId, true);
+            _appliedLoadedAreaToStreamingController = true;
+
+            return true;
         }
 
         private AccountSaveData BuildAccountSaveData()
         {
-            AccountSaveData account = _accountState.CreateSaveData();
+            AccountSaveData account = _accountState != null
+                ? _accountState.CreateSaveData()
+                : new AccountSaveData();
+
             account.AccountId = _activeAccountId;
             EnsureAccountHasCharacter(account, _activeCharacterId);
+
             return account;
         }
 
@@ -246,7 +358,7 @@ namespace ROC.Persistence
                 CharacterId = _activeCharacterId,
                 AccountId = _activeAccountId,
                 CharacterName = defaultCharacterName,
-                SceneId = SceneManager.GetActiveScene().name,
+                SceneId = GetCurrentSceneIdForSave(),
                 Position = new SerializableVector3(transform.position),
                 Yaw = transform.eulerAngles.y
             };
@@ -263,6 +375,27 @@ namespace ROC.Persistence
             }
 
             return character;
+        }
+
+        private string GetCurrentSceneIdForSave()
+        {
+            if (_areaStreamingController == null)
+            {
+                _areaStreamingController = GetComponent<global::PlayerAreaStreamingController>();
+            }
+
+            if (_areaStreamingController != null &&
+                !string.IsNullOrWhiteSpace(_areaStreamingController.CurrentAreaSceneName))
+            {
+                return _areaStreamingController.CurrentAreaSceneName;
+            }
+
+            if (gameObject.scene.IsValid() && !string.IsNullOrWhiteSpace(gameObject.scene.name))
+            {
+                return gameObject.scene.name;
+            }
+
+            return SceneManager.GetActiveScene().name;
         }
 
         private void SubscribeToStateEvents()
@@ -303,6 +436,11 @@ namespace ROC.Persistence
 
         private static void EnsureAccountHasCharacter(AccountSaveData account, string characterId)
         {
+            if (account == null)
+            {
+                return;
+            }
+
             if (account.CharacterIds == null)
             {
                 account.CharacterIds = new List<string>();

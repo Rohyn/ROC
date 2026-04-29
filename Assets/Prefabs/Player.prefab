@@ -58,6 +58,8 @@ GameObject:
   - component: {fileID: -720844528735070886}
   - component: {fileID: 5590071248939819745}
   - component: {fileID: 2298514464617016136}
+  - component: {fileID: -1312632247654305371}
+  - component: {fileID: -5548363901350353299}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -312,10 +314,14 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::NetworkPlayerMotor
   ShowTopMostFoldoutHeaderGroup: 1
   moveSpeed: 4.5
+  clampDiagonalMovement: 1
   jumpHeight: 1.2
   gravity: -20
   groundedStickForce: -2
-  cameraTransformOverride: {fileID: 0}
+  serverAppliesGameplayYawToRoot: 1
+  nonOwnersApplyReplicatedYawToRoot: 1
+  yawReplicationThresholdDegrees: 0.1
+  maxYawDegreesPerSecond: 0
   statusManager: {fileID: 8194632222965225880}
   verboseLogging: 0
 --- !u!114 &8194632222965225880
@@ -358,13 +364,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c706bf99be6c740448c04be8f35e0481, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerInteractionSensor
-  searchRadius: 2.5
-  searchOriginHeight: 0.5
-  refreshIntervalSeconds: 0.08
-  interactableMask:
+  ShowTopMostFoldoutHeaderGroup: 1
+  detectionRadius: 5
+  detectionMask:
     serializedVersion: 2
     m_Bits: 4294967295
-  triggerInteraction: 1
+  refreshIntervalSeconds: 0.08
+  queryTriggerInteraction: 2
   verboseLogging: 1
 --- !u!114 &2635858095395341967
 MonoBehaviour:
@@ -466,4 +472,39 @@ MonoBehaviour:
   ShowTopMostFoldoutHeaderGroup: 1
   initialAreaSceneName: Intro
   unloadPreviousAreaOnOwner: 1
+  verboseLogging: 1
+--- !u!114 &-1312632247654305371
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1a6c9d329e7fabc45978b24d3aa31f60, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ROC.Persistence.PlayerAccountState
+  ShowTopMostFoldoutHeaderGroup: 1
+--- !u!114 &-5548363901350353299
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: da35c932c4bf73b43995f5d112142da2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ROC.Persistence.PlayerPersistenceRoot
+  ShowTopMostFoldoutHeaderGroup: 1
+  useOwnerClientIdInDevIds: 0
+  devAccountId: local_dev_account
+  devCharacterId: local_dev_character
+  defaultCharacterName: Dev Character
+  startingPotential: 3
+  startingInspiration: 0
+  saveDebounceSeconds: 1
+  saveOnSpawnAfterLoad: 0
   verboseLogging: 1
