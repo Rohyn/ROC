@@ -39,6 +39,10 @@ namespace ROC.Persistence
         private string _activeAccountId;
         private string _activeCharacterId;
 
+        private string _explicitAccountId;
+        private string _explicitCharacterId;
+        private bool _hasExplicitIdentity;
+
         private string _loadedCharacterSceneId;
         private bool _loadedExistingCharacter;
         private bool _loaded;
@@ -49,6 +53,38 @@ namespace ROC.Persistence
         public bool IsLoaded => _loaded;
         public bool LoadedExistingCharacter => _loadedExistingCharacter;
         public string LoadedCharacterSceneId => _loadedCharacterSceneId;
+
+        public string GetAccountIdForClient(ulong ownerClientId)
+        {
+            return useOwnerClientIdInDevIds
+                ? $"{devAccountId}_{ownerClientId}"
+                : devAccountId;
+        }
+
+        public string GetCharacterIdForClient(ulong ownerClientId)
+        {
+            return useOwnerClientIdInDevIds
+                ? $"{devCharacterId}_{ownerClientId}"
+                : devCharacterId;
+        }
+
+        public void InitializeIdentityServer(string accountId, string characterId)
+        {
+            if (IsSpawned)
+            {
+                Debug.LogWarning("[PlayerPersistenceRoot] InitializeIdentityServer should be called before spawn.", this);
+            }
+
+            if (string.IsNullOrWhiteSpace(accountId) || string.IsNullOrWhiteSpace(characterId))
+            {
+                Debug.LogWarning("[PlayerPersistenceRoot] Refused invalid explicit identity.", this);
+                return;
+            }
+
+            _explicitAccountId = accountId;
+            _explicitCharacterId = characterId;
+            _hasExplicitIdentity = true;
+        }
 
         private void Awake()
         {
@@ -67,7 +103,7 @@ namespace ROC.Persistence
 
             _saveStore = new JsonFileSaveStore();
 
-            ResolveDevIdentity();
+            ResolveIdentity();
             LoadOrCreateState();
             SubscribeToStateEvents();
 
@@ -139,18 +175,17 @@ namespace ROC.Persistence
             }
         }
 
-        private void ResolveDevIdentity()
+        private void ResolveIdentity()
         {
-            if (useOwnerClientIdInDevIds)
+            if (_hasExplicitIdentity)
             {
-                _activeAccountId = $"{devAccountId}_{OwnerClientId}";
-                _activeCharacterId = $"{devCharacterId}_{OwnerClientId}";
+                _activeAccountId = _explicitAccountId;
+                _activeCharacterId = _explicitCharacterId;
+                return;
             }
-            else
-            {
-                _activeAccountId = devAccountId;
-                _activeCharacterId = devCharacterId;
-            }
+
+            _activeAccountId = GetAccountIdForClient(OwnerClientId);
+            _activeCharacterId = GetCharacterIdForClient(OwnerClientId);
         }
 
         private void LoadOrCreateState()
