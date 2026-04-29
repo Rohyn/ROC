@@ -1,6 +1,6 @@
 using System.Collections.Generic;
-using UnityEngine;
 using Unity.Netcode;
+using UnityEngine;
 
 /// <summary>
 /// Generic interaction shell placed on any object the player can use.
@@ -8,15 +8,16 @@ using Unity.Netcode;
 /// This script does NOT hardcode any specific behavior like "rest" or "rotate".
 /// Instead, it discovers attached InteractableAction components and executes them.
 ///
-/// This version supports:
+/// Supports:
+/// - stable authored InteractableId lookup
 /// - interaction consumption scope
 /// - optional target collider for wide/low objects
-/// - ANY NUMBER of interaction focus points
+/// - any number of interaction focus points
 ///
 /// IMPORTANT:
-/// - interactionTargetCollider is still the best choice for distance/range checks
-/// - interactionFocusPoints are used for facing checks, LOS, and prompt placement
-/// - when multiple focus points exist, the nearest one to the querying origin is used
+/// - Static authored scene objects can be resolved by InteractableId.
+/// - They do not need to be spawned NetworkObjects just to be interacted with.
+/// - Networked consumption modes still require normal Netcode spawning to replicate.
 /// </summary>
 [RequireComponent(typeof(NetworkObject))]
 public class GenericInteractable : NetworkBehaviour
@@ -25,7 +26,8 @@ public class GenericInteractable : NetworkBehaviour
     [SerializeField] private string interactionPrompt = "Interact";
     [SerializeField] private float interactionRange = 2.5f;
     [SerializeField] private bool isEnabled = true;
-    [Tooltip("Stable identifier used by quests and other systems when this object is interacted with.")]
+
+    [Tooltip("Stable identifier used by quests, interaction lookup, and other systems. Must be unique within the scene/area.")]
     [SerializeField] private string interactableId;
 
     [Header("Selection / Targeting")]
@@ -53,9 +55,7 @@ public class GenericInteractable : NetworkBehaviour
     private readonly List<InteractableAction> _actions = new();
     private readonly List<InteractableAvailabilityRules> _availabilityRules = new();
 
-    private readonly NetworkVariable<bool> _globallyConsumed =
-        new NetworkVariable<bool>(false);
-
+    private readonly NetworkVariable<bool> _globallyConsumed = new(false);
     private readonly NetworkList<ulong> _consumedByClientIds = new();
 
     private Renderer[] _cachedRenderers;
@@ -67,13 +67,11 @@ public class GenericInteractable : NetworkBehaviour
     public bool IsEnabled => isEnabled;
     public float SelectionPriorityBonus => selectionPriorityBonus;
     public Collider InteractionTargetCollider => interactionTargetCollider;
-    public string InteractableId => !string.IsNullOrWhiteSpace(interactableId) ? interactableId : name;
 
-    /// <summary>
-    /// Backward-compatible convenience property.
-    /// Uses the nearest focus point to this object's root position.
-    /// This is mainly a fallback; callers should prefer GetBestInteractionFocusPosition(referencePosition).
-    /// </summary>
+    public string InteractableId => !string.IsNullOrWhiteSpace(interactableId)
+        ? interactableId
+        : name;
+
     public Vector3 InteractionFocusPosition => GetBestInteractionFocusPosition(transform.position);
 
     private void Awake()
@@ -83,11 +81,20 @@ public class GenericInteractable : NetworkBehaviour
         CachePresentationComponents();
     }
 
+    private void OnEnable()
+    {
+        InteractableRegistry.Register(this);
+    }
+
+    private void OnDisable()
+    {
+        InteractableRegistry.Unregister(this);
+    }
+
     public override void OnNetworkSpawn()
     {
         _globallyConsumed.OnValueChanged += HandleGlobalConsumedChanged;
         _consumedByClientIds.OnListChanged += HandleConsumedByClientIdsChanged;
-
         RefreshLocalConsumedStateAndPresentation();
     }
 
@@ -97,13 +104,20 @@ public class GenericInteractable : NetworkBehaviour
         _consumedByClientIds.OnListChanged -= HandleConsumedByClientIdsChanged;
     }
 
+    private void OnValidate()
+    {
+        if (interactionRange < 0.1f)
+        {
+            interactionRange = 0.1f;
+        }
+    }
+
     private void CacheActions()
     {
         _actions.Clear();
 
         InteractableAction[] actions = GetComponents<InteractableAction>();
         _actions.AddRange(actions);
-
         _actions.Sort((a, b) => a.ExecutionOrder.CompareTo(b.ExecutionOrder));
     }
 
@@ -121,22 +135,6 @@ public class GenericInteractable : NetworkBehaviour
         _cachedColliders = GetComponentsInChildren<Collider>(true);
     }
 
-    private void OnValidate()
-    {
-        if (interactionRange < 0.1f)
-        {
-            interactionRange = 0.1f;
-        }
-    }
-
-    /// <summary>
-    /// Returns the best point on or for this interactable to evaluate range/distance against.
-    ///
-    /// Priority:
-    /// 1. ClosestPoint on the configured target collider
-    /// 2. Best interaction focus point relative to origin
-    /// 3. Interactable root transform position
-    /// </summary>
     public Vector3 GetInteractionEvaluationPoint(Vector3 origin)
     {
         if (interactionTargetCollider != null)
@@ -147,11 +145,6 @@ public class GenericInteractable : NetworkBehaviour
         return GetBestInteractionFocusPosition(origin);
     }
 
-    /// <summary>
-    /// Returns the nearest valid interaction focus point relative to the provided reference position.
-    ///
-    /// If no focus points are assigned, falls back to the interactable root transform position.
-    /// </summary>
     public Vector3 GetBestInteractionFocusPosition(Vector3 referencePosition)
     {
         if (interactionFocusPoints == null || interactionFocusPoints.Length == 0)
@@ -166,12 +159,14 @@ public class GenericInteractable : NetworkBehaviour
         for (int i = 0; i < interactionFocusPoints.Length; i++)
         {
             Transform focus = interactionFocusPoints[i];
+
             if (focus == null)
             {
                 continue;
             }
 
             float sqrDistance = (focus.position - referencePosition).sqrMagnitude;
+
             if (!foundAny || sqrDistance < bestSqrDistance)
             {
                 foundAny = true;
@@ -195,25 +190,13 @@ public class GenericInteractable : NetworkBehaviour
             return false;
         }
 
-        // -------------------------------------------------------------
-        // Conversation lockout
-        // -------------------------------------------------------------
-        // While the player is already in a conversation, all world interaction
-        // should be suppressed. This prevents prompts/selection from feeling weird
-        // and avoids repeated E presses on nearby objects or the same NPC.
         PlayerConversationState conversationState = interactorObject.GetComponent<PlayerConversationState>();
         if (conversationState != null && conversationState.IsConversationOpen)
         {
             return false;
         }
-        // -------------------------------------------------------------
-        // Area transfer lockout
-        // -------------------------------------------------------------
-        // While the player is in the middle of an area transfer, suppress all
-        // world interactions and prompts.
-        PlayerAreaStreamingController areaStreaming =
-            interactorObject.GetComponent<PlayerAreaStreamingController>();
 
+        PlayerAreaStreamingController areaStreaming = interactorObject.GetComponent<PlayerAreaStreamingController>();
         if (areaStreaming != null && areaStreaming.IsAreaTransferInProgress)
         {
             return false;
@@ -238,7 +221,7 @@ public class GenericInteractable : NetworkBehaviour
             }
         }
 
-        if (!IsServer && _locallyConsumedForThisClient)
+        if (!IsServerContext() && _locallyConsumedForThisClient)
         {
             return false;
         }
@@ -248,6 +231,7 @@ public class GenericInteractable : NetworkBehaviour
         for (int i = 0; i < _availabilityRules.Count; i++)
         {
             InteractableAvailabilityRules rules = _availabilityRules[i];
+
             if (rules == null)
             {
                 continue;
@@ -261,14 +245,14 @@ public class GenericInteractable : NetworkBehaviour
 
         Vector3 interactorPosition = interactorObject.transform.position;
         Vector3 evaluationPoint = GetInteractionEvaluationPoint(interactorPosition);
-
         float distance = Vector3.Distance(interactorPosition, evaluationPoint);
+
         return distance <= interactionRange;
     }
 
     public bool TryInteract(GameObject interactorObject)
     {
-        if (!IsServer)
+        if (!IsServerContext())
         {
             Debug.LogWarning("[GenericInteractable] TryInteract should be executed on the server.", this);
             return false;
@@ -280,12 +264,12 @@ public class GenericInteractable : NetworkBehaviour
         }
 
         InteractionContext context = new InteractionContext(interactorObject);
-
         bool executedAtLeastOneAction = false;
 
         for (int i = 0; i < _actions.Count; i++)
         {
             InteractableAction action = _actions[i];
+
             if (action == null)
             {
                 continue;
@@ -296,7 +280,10 @@ public class GenericInteractable : NetworkBehaviour
                 continue;
             }
 
-            Debug.Log($"[GenericInteractable] Executing action '{action.GetType().Name}' on '{name}'.");
+            if (verboseLogging)
+            {
+                Debug.Log($"[GenericInteractable] Executing action '{action.GetType().Name}' on '{name}'.", this);
+            }
 
             action.Execute(context);
             executedAtLeastOneAction = true;
@@ -309,7 +296,6 @@ public class GenericInteractable : NetworkBehaviour
 
         if (executedAtLeastOneAction)
         {
-            // Emit a normalized interaction event for quests.
             QuestEventUtility.EmitToPlayer(
                 context.InteractorObject,
                 GameplayEventData.CreateInteractedWithObjectEvent(InteractableId));
@@ -337,12 +323,38 @@ public class GenericInteractable : NetworkBehaviour
                     return;
                 }
 
+                if (!IsSpawned)
+                {
+                    if (verboseLogging)
+                    {
+                        Debug.LogWarning(
+                            $"[GenericInteractable] '{name}' uses PerPlayer consumption but is not a spawned NetworkObject. " +
+                            "Use persistent progress flags for durable per-character hiding.",
+                            this);
+                    }
+
+                    return;
+                }
+
                 MarkConsumedForClient(context.InteractorClientId);
                 return;
             }
 
             case InteractionConsumptionMode.Global:
             {
+                if (!IsSpawned)
+                {
+                    if (verboseLogging)
+                    {
+                        Debug.LogWarning(
+                            $"[GenericInteractable] '{name}' uses Global consumption but is not a spawned NetworkObject. " +
+                            "Use a networked world-state component or spawn this object through Netcode.",
+                            this);
+                    }
+
+                    return;
+                }
+
                 MarkConsumedGlobally();
                 return;
             }
@@ -400,16 +412,23 @@ public class GenericInteractable : NetworkBehaviour
     {
         bool isConsumedForLocalClient = _globallyConsumed.Value;
 
-        if (!isConsumedForLocalClient && NetworkManager != null)
+        if (!isConsumedForLocalClient)
         {
-            ulong localClientId = NetworkManager.LocalClientId;
+            NetworkManager networkManager = NetworkManager != null
+                ? NetworkManager
+                : NetworkManager.Singleton;
 
-            for (int i = 0; i < _consumedByClientIds.Count; i++)
+            if (networkManager != null)
             {
-                if (_consumedByClientIds[i] == localClientId)
+                ulong localClientId = networkManager.LocalClientId;
+
+                for (int i = 0; i < _consumedByClientIds.Count; i++)
                 {
-                    isConsumedForLocalClient = true;
-                    break;
+                    if (_consumedByClientIds[i] == localClientId)
+                    {
+                        isConsumedForLocalClient = true;
+                        break;
+                    }
                 }
             }
         }
@@ -434,6 +453,7 @@ public class GenericInteractable : NetworkBehaviour
             for (int i = 0; i < _cachedRenderers.Length; i++)
             {
                 Renderer rendererComponent = _cachedRenderers[i];
+
                 if (rendererComponent == null)
                 {
                     continue;
@@ -448,6 +468,7 @@ public class GenericInteractable : NetworkBehaviour
             for (int i = 0; i < _cachedColliders.Length; i++)
             {
                 Collider colliderComponent = _cachedColliders[i];
+
                 if (colliderComponent == null)
                 {
                     continue;
@@ -456,5 +477,19 @@ public class GenericInteractable : NetworkBehaviour
                 colliderComponent.enabled = visibleAndInteractive;
             }
         }
+    }
+
+    private bool IsServerContext()
+    {
+        if (IsServer)
+        {
+            return true;
+        }
+
+        NetworkManager networkManager = NetworkManager != null
+            ? NetworkManager
+            : NetworkManager.Singleton;
+
+        return networkManager != null && networkManager.IsServer;
     }
 }

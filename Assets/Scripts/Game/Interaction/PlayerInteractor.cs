@@ -1,19 +1,19 @@
+using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using Unity.Netcode;
+using UnityEngine.SceneManagement;
 
 /// <summary>
 /// Handles the owning player's interaction input.
 ///
-/// This version uses the local selector for UX/targeting,
-/// but sends the actual interaction request to the server.
+/// DESIGN:
+/// - Client selects a nearby interactable locally for responsive UX.
+/// - Client sends only the selected interactable's stable ID to the server.
+/// - Server resolves that ID in the player's authoritative current area.
+/// - Server validates range/availability through GenericInteractable.CanInteract(...).
+/// - Server executes the interaction authoritatively.
 ///
-/// That means:
-/// - client decides what it is trying to interact with
-/// - server validates range via GenericInteractable.CanInteract(...)
-/// - server executes the action chain authoritatively
-///
-/// This keeps prompt/selection responsive while making interaction authoritative.
+/// This avoids requiring authored/static scene interactables to be spawned NetworkObjects.
 /// </summary>
 [DisallowMultipleComponent]
 public class PlayerInteractor : NetworkBehaviour
@@ -26,17 +26,20 @@ public class PlayerInteractor : NetworkBehaviour
     [Tooltip("If true, interaction attempts and failures will be logged.")]
     [SerializeField] private bool verboseLogging = false;
 
+    private PlayerAreaStreamingController _areaStreamingController;
+
     private void Awake()
     {
         if (interactionSelector == null)
         {
             interactionSelector = GetComponent<PlayerInteractionSelector>();
         }
+
+        _areaStreamingController = GetComponent<PlayerAreaStreamingController>();
     }
 
     private void Update()
     {
-        // Only the owning client should read local input.
         if (!IsOwner)
         {
             return;
@@ -58,85 +61,104 @@ public class PlayerInteractor : NetworkBehaviour
     {
         if (interactionSelector == null)
         {
-            Debug.LogWarning("[PlayerInteractor] No PlayerInteractionSelector assigned.");
+            Debug.LogWarning("[PlayerInteractor] No PlayerInteractionSelector assigned.", this);
             return;
         }
 
         GenericInteractable target = interactionSelector.CurrentTarget;
+
         if (target == null)
         {
             if (verboseLogging)
             {
-                Debug.Log("[PlayerInteractor] No current interactable target.");
+                Debug.Log("[PlayerInteractor] No current interactable target.", this);
             }
 
             return;
         }
 
-        NetworkObject targetNetworkObject = target.GetComponent<NetworkObject>();
-        if (targetNetworkObject == null)
+        string interactableId = target.InteractableId;
+
+        if (string.IsNullOrWhiteSpace(interactableId))
         {
-            Debug.LogWarning($"[PlayerInteractor] Target '{target.name}' has no NetworkObject. Server interaction requires one.");
+            Debug.LogWarning($"[PlayerInteractor] Target '{target.name}' has no usable InteractableId.", target);
             return;
         }
 
         if (IsServer)
         {
-            PerformInteractionOnServer(targetNetworkObject);
+            PerformInteractionByIdOnServer(interactableId);
             return;
         }
 
-        RequestInteractRpc(new NetworkObjectReference(targetNetworkObject));
+        RequestInteractByIdRpc(interactableId);
     }
 
-    /// <summary>
-    /// Client -> Server interaction request.
-    /// </summary>
     [Rpc(SendTo.Server)]
-    private void RequestInteractRpc(NetworkObjectReference targetReference)
+    private void RequestInteractByIdRpc(string interactableId)
     {
-        if (!targetReference.TryGet(out NetworkObject targetNetworkObject, NetworkManager))
+        PerformInteractionByIdOnServer(interactableId);
+    }
+
+    private void PerformInteractionByIdOnServer(string interactableId)
+    {
+        if (!IsServer)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(interactableId))
+        {
+            return;
+        }
+
+        string areaSceneName = GetAuthoritativeAreaSceneName();
+
+        if (string.IsNullOrWhiteSpace(areaSceneName))
         {
             if (verboseLogging)
             {
-                Debug.Log("[PlayerInteractor] Server could not resolve NetworkObjectReference for interaction.");
+                Debug.LogWarning("[PlayerInteractor] Could not resolve authoritative area scene for interaction.", this);
             }
 
             return;
         }
 
-        PerformInteractionOnServer(targetNetworkObject);
+        if (!InteractableRegistry.TryGet(areaSceneName, interactableId, out GenericInteractable interactable))
+        {
+            if (verboseLogging)
+            {
+                Debug.LogWarning(
+                    $"[PlayerInteractor] Server could not resolve interactable id '{interactableId}' in area '{areaSceneName}'.",
+                    this);
+            }
+
+            return;
+        }
+
+        PerformInteractionOnServer(interactable);
     }
 
-    /// <summary>
-    /// Runs on the server and executes the interaction if it is valid.
-    /// </summary>
-    private void PerformInteractionOnServer(NetworkObject targetNetworkObject)
+    private void PerformInteractionOnServer(GenericInteractable interactable)
     {
-        if (targetNetworkObject == null)
+        if (!IsServer)
         {
             return;
         }
 
-        GenericInteractable interactable = targetNetworkObject.GetComponent<GenericInteractable>();
         if (interactable == null)
         {
-            if (verboseLogging)
-            {
-                Debug.Log("[PlayerInteractor] Target NetworkObject has no GenericInteractable.");
-            }
-
             return;
         }
 
-        // First-pass server validation:
-        // only validate authoritative proximity/range through CanInteract.
-        // This is enough for now and keeps the architecture simple.
         if (!interactable.CanInteract(gameObject))
         {
             if (verboseLogging)
             {
-                Debug.Log($"[PlayerInteractor] Server rejected interaction with '{interactable.name}' because CanInteract returned false.");
+                Debug.Log(
+                    $"[PlayerInteractor] Server rejected interaction with '{interactable.name}' " +
+                    $"id='{interactable.InteractableId}' because CanInteract returned false.",
+                    interactable);
             }
 
             return;
@@ -146,7 +168,33 @@ public class PlayerInteractor : NetworkBehaviour
 
         if (verboseLogging)
         {
-            Debug.Log($"[PlayerInteractor] Server processed interaction with '{interactable.name}'. Success={success}");
+            Debug.Log(
+                $"[PlayerInteractor] Server processed interaction with '{interactable.name}' " +
+                $"id='{interactable.InteractableId}'. Success={success}",
+                interactable);
         }
+    }
+
+    private string GetAuthoritativeAreaSceneName()
+    {
+        if (_areaStreamingController == null)
+        {
+            _areaStreamingController = GetComponent<PlayerAreaStreamingController>();
+        }
+
+        if (_areaStreamingController != null &&
+            !string.IsNullOrWhiteSpace(_areaStreamingController.CurrentAreaSceneName))
+        {
+            return _areaStreamingController.CurrentAreaSceneName;
+        }
+
+        Scene scene = gameObject.scene;
+
+        if (scene.IsValid() && !string.IsNullOrWhiteSpace(scene.name))
+        {
+            return scene.name;
+        }
+
+        return SceneManager.GetActiveScene().name;
     }
 }

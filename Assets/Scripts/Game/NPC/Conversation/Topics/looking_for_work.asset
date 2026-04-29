@@ -10,12 +10,12 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 138764e111f51bd49a783ab5cbc770f4, type: 3}
-  m_Name: who_are_you
+  m_Name: looking_for_work
   m_EditorClassIdentifier: Assembly-CSharp::ConversationTopicDefinition
-  topicId: topic.who_are_you
-  displayName: Who are you?
+  topicId: topic.looking_for_work
+  displayName: I'm looking for work.
   parentTopic: {fileID: 0}
-  sortOrder: 0
+  sortOrder: 10
   availabilityConditions:
     requiredProgressFlags: []
     blockedProgressFlags: []

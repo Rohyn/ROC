@@ -60,6 +60,7 @@ GameObject:
   - component: {fileID: 2298514464617016136}
   - component: {fileID: -1312632247654305371}
   - component: {fileID: -5548363901350353299}
+  - component: {fileID: -5530406983675076714}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -508,3 +509,19 @@ MonoBehaviour:
   saveDebounceSeconds: 1
   saveOnSpawnAfterLoad: 0
   verboseLogging: 1
+--- !u!114 &-5530406983675076714
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bf12069a45e10b7429fcbe1286598628, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerQuestLog
+  ShowTopMostFoldoutHeaderGroup: 1
+  verboseLogging: 1
+  activeQuests: []
+  completedQuestDefinitionIds: []

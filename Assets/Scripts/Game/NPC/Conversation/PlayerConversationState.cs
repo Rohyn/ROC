@@ -12,10 +12,6 @@ using UnityEngine;
 /// - resolve selected topics on the server
 /// - send response payloads to the owner client
 /// - automatically close the conversation if the player moves too far away
-///
-/// IMPORTANT:
-/// - lives on the player prefab
-/// - conversation is per-player, not globally shared
 /// </summary>
 [DisallowMultipleComponent]
 [RequireComponent(typeof(NetworkObject))]
@@ -32,6 +28,7 @@ public class PlayerConversationState : NetworkBehaviour
 
     private string _speakerName = string.Empty;
     private string _responseText = string.Empty;
+
     private readonly List<PlayerConversationTopicOption> _availableTopics = new();
 
     public bool IsConversationOpen { get; private set; }
@@ -65,8 +62,7 @@ public class PlayerConversationState : NetworkBehaviour
         }
 
         float maxDistanceSqr = maxConversationDistance * maxConversationDistance;
-        float currentDistanceSqr =
-            (_activeNpcConversationServer.transform.position - transform.position).sqrMagnitude;
+        float currentDistanceSqr = (_activeNpcConversationServer.transform.position - transform.position).sqrMagnitude;
 
         if (currentDistanceSqr > maxDistanceSqr)
         {
@@ -99,9 +95,9 @@ public class PlayerConversationState : NetworkBehaviour
         _activeNpcConversationServer = npcConversation;
         IsConversationOpen = true;
 
-        NPCConversationResponseData response =
-            _activeNpcConversationServer.GetOpeningResponse(gameObject);
+        EmitTalkedToNpcEvent(npcConversation);
 
+        NPCConversationResponseData response = _activeNpcConversationServer.GetOpeningResponse(gameObject);
         PushResponseToOwner(response);
 
         if (verboseLogging)
@@ -169,9 +165,7 @@ public class PlayerConversationState : NetworkBehaviour
             return;
         }
 
-        NPCConversationResponseData response =
-            _activeNpcConversationServer.ResolveTopicById(gameObject, topicId);
-
+        NPCConversationResponseData response = _activeNpcConversationServer.ResolveTopicById(gameObject, topicId);
         PushResponseToOwner(response);
 
         if (verboseLogging)
@@ -189,11 +183,36 @@ public class PlayerConversationState : NetworkBehaviour
 
         _activeNpcConversationServer = null;
         IsConversationOpen = false;
+
         CloseConversationRpc();
 
         if (verboseLogging)
         {
             Debug.Log("[PlayerConversationState] Closed conversation.", this);
+        }
+    }
+
+    private void EmitTalkedToNpcEvent(NPCConversationComponent npcConversation)
+    {
+        if (npcConversation == null)
+        {
+            return;
+        }
+
+        string npcId = npcConversation.NpcId;
+
+        if (string.IsNullOrWhiteSpace(npcId))
+        {
+            return;
+        }
+
+        QuestEventUtility.EmitToPlayer(
+            gameObject,
+            GameplayEventData.CreateTalkedToNpcEvent(npcId));
+
+        if (verboseLogging)
+        {
+            Debug.Log($"[PlayerConversationState] Emitted TalkedToNpc event for '{npcId}'.", this);
         }
     }
 
@@ -210,6 +229,7 @@ public class PlayerConversationState : NetworkBehaviour
         for (int i = 0; i < topicCount; i++)
         {
             ConversationTopicDefinition topic = response.availableTopics[i];
+
             if (topic == null)
             {
                 topics[i] = default;

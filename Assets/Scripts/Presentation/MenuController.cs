@@ -1,5 +1,5 @@
-using UnityEngine;
 using ROC.Inventory;
+using UnityEngine;
 
 /// <summary>
 /// Persistent menu controller.
@@ -10,21 +10,14 @@ using ROC.Inventory;
 /// - When cursor mode enters MenuCursor, the Menu panel opens.
 /// - When cursor mode leaves MenuCursor, the Menu panel closes.
 /// - The menu remembers the last selected tab for this session.
-///
-/// CURRENT SCOPE:
-/// - Only the Inventory tab exists
-///
-/// FUTURE SCOPE:
-/// - Map
-/// - Journal
-/// - other menu tabs
 /// </summary>
 [DisallowMultipleComponent]
 public class MenuController : MonoBehaviour
 {
     public enum MenuTab
     {
-        Inventory = 0
+        Inventory = 0,
+        Journal = 1
     }
 
     [Header("Menu Root")]
@@ -32,25 +25,23 @@ public class MenuController : MonoBehaviour
     [SerializeField] private GameObject menuRoot;
 
     [Header("Tab Views")]
-    [Tooltip("Inventory tab view.")]
     [SerializeField] private InventoryPanelView inventoryPanelView;
+    [SerializeField] private JournalPanelView journalPanelView;
 
     [Header("Defaults")]
-    [Tooltip("Which tab should open first if the player has not selected one yet this session.")]
     [SerializeField] private MenuTab defaultTab = MenuTab.Inventory;
 
     [Header("Binding")]
-    [Tooltip("How often to retry finding the local player's look controller and inventory when not yet bound.")]
     [SerializeField] private float searchIntervalSeconds = 0.5f;
 
     [Header("Debug")]
-    [Tooltip("If true, menu open/close and binding events will be logged.")]
     [SerializeField] private bool verboseLogging = false;
 
     private PlayerLookController _boundLookController;
     private PlayerInventory _boundInventory;
-    private float _nextSearchTime;
+    private PlayerQuestLog _boundQuestLog;
 
+    private float _nextSearchTime;
     private bool _isMenuOpen;
     private MenuTab _lastSelectedTab;
 
@@ -76,6 +67,7 @@ public class MenuController : MonoBehaviour
     {
         UnbindLookController();
         UnbindInventory();
+        UnbindQuestLog();
 
         if (menuRoot != null)
         {
@@ -95,31 +87,27 @@ public class MenuController : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Public hook for future ribbon buttons.
-    /// Example: wire a UI button to call SelectInventoryTab().
-    /// </summary>
     public void SelectInventoryTab()
     {
         ShowTab(MenuTab.Inventory);
+    }
+
+    public void SelectJournalTab()
+    {
+        ShowTab(MenuTab.Journal);
     }
 
     private void TryBindDependencies(bool force)
     {
         if (force || _boundLookController == null)
         {
-            PlayerLookController[] lookControllers =
-                FindObjectsByType<PlayerLookController>(FindObjectsSortMode.None);
+            PlayerLookController[] lookControllers = FindObjectsByType<PlayerLookController>(FindObjectsSortMode.None);
 
             for (int i = 0; i < lookControllers.Length; i++)
             {
                 PlayerLookController lookController = lookControllers[i];
-                if (lookController == null)
-                {
-                    continue;
-                }
 
-                if (!lookController.IsOwner)
+                if (lookController == null || !lookController.IsOwner)
                 {
                     continue;
                 }
@@ -131,18 +119,13 @@ public class MenuController : MonoBehaviour
 
         if (force || _boundInventory == null)
         {
-            PlayerInventory[] inventories =
-                FindObjectsByType<PlayerInventory>(FindObjectsSortMode.None);
+            PlayerInventory[] inventories = FindObjectsByType<PlayerInventory>(FindObjectsSortMode.None);
 
             for (int i = 0; i < inventories.Length; i++)
             {
                 PlayerInventory inventory = inventories[i];
-                if (inventory == null)
-                {
-                    continue;
-                }
 
-                if (!inventory.IsOwner)
+                if (inventory == null || !inventory.IsOwner)
                 {
                     continue;
                 }
@@ -152,7 +135,24 @@ public class MenuController : MonoBehaviour
             }
         }
 
-        // If the menu is already open and we newly found inventory, refresh the current tab.
+        if (force || _boundQuestLog == null)
+        {
+            PlayerQuestLog[] questLogs = FindObjectsByType<PlayerQuestLog>(FindObjectsSortMode.None);
+
+            for (int i = 0; i < questLogs.Length; i++)
+            {
+                PlayerQuestLog questLog = questLogs[i];
+
+                if (questLog == null || !questLog.IsOwner)
+                {
+                    continue;
+                }
+
+                BindQuestLog(questLog);
+                break;
+            }
+        }
+
         if (_isMenuOpen)
         {
             ShowTab(_lastSelectedTab);
@@ -176,7 +176,6 @@ public class MenuController : MonoBehaviour
             Debug.Log("[MenuController] Bound local PlayerLookController.");
         }
 
-        // Sync immediately to current mode.
         HandleCursorModeChanged(_boundLookController.CurrentCursorMode);
     }
 
@@ -218,6 +217,39 @@ public class MenuController : MonoBehaviour
         {
             _boundInventory.InventoryChanged -= HandleInventoryChanged;
             _boundInventory = null;
+        }
+    }
+
+    private void BindQuestLog(PlayerQuestLog questLog)
+    {
+        if (_boundQuestLog == questLog)
+        {
+            return;
+        }
+
+        UnbindQuestLog();
+
+        _boundQuestLog = questLog;
+        _boundQuestLog.QuestLogChanged += HandleQuestLogChanged;
+        _boundQuestLog.RequestQuestJournalSnapshot();
+
+        if (verboseLogging)
+        {
+            Debug.Log("[MenuController] Bound local PlayerQuestLog.");
+        }
+
+        if (_isMenuOpen && _lastSelectedTab == MenuTab.Journal)
+        {
+            RefreshJournalTab();
+        }
+    }
+
+    private void UnbindQuestLog()
+    {
+        if (_boundQuestLog != null)
+        {
+            _boundQuestLog.QuestLogChanged -= HandleQuestLogChanged;
+            _boundQuestLog = null;
         }
     }
 
@@ -263,7 +295,6 @@ public class MenuController : MonoBehaviour
         }
 
         _isMenuOpen = false;
-
         HideAllTabs();
 
         if (menuRoot != null)
@@ -280,19 +311,19 @@ public class MenuController : MonoBehaviour
     private void ShowTab(MenuTab tab)
     {
         _lastSelectedTab = tab;
-
         HideAllTabs();
 
         switch (_lastSelectedTab)
         {
             case MenuTab.Inventory:
             {
-                if (inventoryPanelView != null)
-                {
-                    inventoryPanelView.Show();
-                    inventoryPanelView.RenderInventory(_boundInventory);
-                }
+                RefreshInventoryTab();
+                break;
+            }
 
+            case MenuTab.Journal:
+            {
+                RefreshJournalTab();
                 break;
             }
         }
@@ -304,26 +335,57 @@ public class MenuController : MonoBehaviour
         {
             inventoryPanelView.Hide();
         }
+
+        if (journalPanelView != null)
+        {
+            journalPanelView.Hide();
+        }
     }
 
     private void HandleInventoryChanged()
     {
-        if (!_isMenuOpen)
+        if (!_isMenuOpen || _lastSelectedTab != MenuTab.Inventory)
         {
             return;
         }
 
-        if (_lastSelectedTab == MenuTab.Inventory)
+        RefreshInventoryTab();
+    }
+
+    private void HandleQuestLogChanged()
+    {
+        if (!_isMenuOpen || _lastSelectedTab != MenuTab.Journal)
         {
-            RefreshInventoryTab();
+            return;
         }
+
+        RefreshJournalTab();
     }
 
     private void RefreshInventoryTab()
     {
-        if (inventoryPanelView != null)
+        if (inventoryPanelView == null)
         {
-            inventoryPanelView.RenderInventory(_boundInventory);
+            return;
         }
+
+        inventoryPanelView.Show();
+        inventoryPanelView.RenderInventory(_boundInventory);
+    }
+
+    private void RefreshJournalTab()
+    {
+        if (journalPanelView == null)
+        {
+            return;
+        }
+
+        if (_boundQuestLog != null)
+        {
+            _boundQuestLog.RequestQuestJournalSnapshot();
+        }
+
+        journalPanelView.Show();
+        journalPanelView.RenderJournal(_boundQuestLog);
     }
 }

@@ -24,6 +24,10 @@ public class ConversationEntryDefinition
     public int priority = 0;
     public ConversationEntryConditionSet conditions;
 
+    [Header("Effects")]
+    [Tooltip("Server-side effects applied when this entry is selected.")]
+    public ConversationEntryEffectDefinition effects;
+
     [Header("Follow-up Topics")]
     [Tooltip("If empty, conversation falls back to the profile's root topics.")]
     public ConversationTopicDefinition[] followUpTopics;

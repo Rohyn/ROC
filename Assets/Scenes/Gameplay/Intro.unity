@@ -408,7 +408,7 @@ MonoBehaviour:
   interactionPrompt: Interact
   interactionRange: 2.5
   isEnabled: 1
-  interactableId: 
+  interactableId: intro.bed
   interactionFocusPoints:
   - {fileID: 1154487639}
   interactionTargetCollider: {fileID: 564487354}
@@ -950,7 +950,7 @@ MonoBehaviour:
   interactionPrompt: Interact
   interactionRange: 2.5
   isEnabled: 1
-  interactableId: 
+  interactableId: intro.door
   interactionFocusPoints:
   - {fileID: 1543319567}
   interactionTargetCollider: {fileID: 836445750}
@@ -1443,7 +1443,7 @@ MonoBehaviour:
   interactionPrompt: Interact
   interactionRange: 2.5
   isEnabled: 1
-  interactableId: 
+  interactableId: intro.wardrobe
   interactionFocusPoints:
   - {fileID: 1003030519}
   interactionTargetCollider: {fileID: 1637145794}
@@ -1674,7 +1674,7 @@ MonoBehaviour:
   interactionPrompt: Talk
   interactionRange: 2.5
   isEnabled: 1
-  interactableId: 
+  interactableId: npc.aidan
   interactionFocusPoints: []
   interactionTargetCollider: {fileID: 1700670232}
   selectionPriorityBonus: 0
@@ -1903,7 +1903,7 @@ MonoBehaviour:
   interactionPrompt: Interact
   interactionRange: 2.5
   isEnabled: 1
-  interactableId: 
+  interactableId: intro.key
   interactionFocusPoints:
   - {fileID: 1813610883}
   interactionTargetCollider: {fileID: 1876646791}

@@ -7,13 +7,9 @@ using UnityEngine;
 /// This component combines:
 /// - resolved NPC identity
 /// - authored conversation profile
-/// - player state (progress/inventory/equipment)
+/// - player state
 ///
-/// CURRENT RESPONSIBILITIES:
-/// - provide an opening response
-/// - resolve topic selections
-/// - return the available next topics
-/// - resolve topics by topicId so network/UI systems can talk in strings
+/// Server-side topic resolution can apply entry effects such as accepting quests.
 /// </summary>
 [RequireComponent(typeof(NPCIdentityComponent))]
 public class NPCConversationComponent : MonoBehaviour
@@ -24,6 +20,7 @@ public class NPCConversationComponent : MonoBehaviour
     private NPCIdentityComponent identityComponent;
 
     public string DisplayName => identityComponent != null ? identityComponent.DisplayName : "Unknown";
+    public string NpcId => identityComponent != null ? identityComponent.NpcId : string.Empty;
     public NPCConversationProfile ConversationProfile => conversationProfile;
 
     private void Awake()
@@ -58,10 +55,12 @@ public class NPCConversationComponent : MonoBehaviour
 
         if (bestEntry != null)
         {
+            ApplyEntryEffects(interactorObject, bestEntry);
+
             ConversationTopicDefinition[] nextTopics =
                 bestEntry.followUpTopics != null && bestEntry.followUpTopics.Length > 0
-                ? GetAvailableTopics(interactorObject, bestEntry.followUpTopics)
-                : GetAvailableTopics(interactorObject, conversationProfile != null ? conversationProfile.RootTopics : null);
+                    ? GetAvailableTopics(interactorObject, bestEntry.followUpTopics)
+                    : GetAvailableTopics(interactorObject, conversationProfile != null ? conversationProfile.RootTopics : null);
 
             return new NPCConversationResponseData(
                 DisplayName,
@@ -101,7 +100,9 @@ public class NPCConversationComponent : MonoBehaviour
         return ResolveTopic(interactorObject, topic);
     }
 
-    public ConversationTopicDefinition[] GetAvailableTopics(GameObject interactorObject, ConversationTopicDefinition[] candidateTopics)
+    public ConversationTopicDefinition[] GetAvailableTopics(
+        GameObject interactorObject,
+        ConversationTopicDefinition[] candidateTopics)
     {
         if (candidateTopics == null || candidateTopics.Length == 0)
         {
@@ -113,12 +114,18 @@ public class NPCConversationComponent : MonoBehaviour
         for (int i = 0; i < candidateTopics.Length; i++)
         {
             ConversationTopicDefinition topic = candidateTopics[i];
+
             if (topic == null)
             {
                 continue;
             }
 
             if (!topic.IsAvailableFor(interactorObject))
+            {
+                continue;
+            }
+
+            if (!HasAvailableEntryForTopic(interactorObject, topic))
             {
                 continue;
             }
@@ -141,12 +148,12 @@ public class NPCConversationComponent : MonoBehaviour
 
         HashSet<ConversationTopicDefinition> seen = new HashSet<ConversationTopicDefinition>();
 
-        // Search root topics first.
         if (conversationProfile.RootTopics != null)
         {
             for (int i = 0; i < conversationProfile.RootTopics.Length; i++)
             {
                 ConversationTopicDefinition topic = conversationProfile.RootTopics[i];
+
                 if (topic == null || !seen.Add(topic))
                 {
                     continue;
@@ -160,12 +167,12 @@ public class NPCConversationComponent : MonoBehaviour
             }
         }
 
-        // Search entry topics and follow-up topics.
         if (conversationProfile.Entries != null)
         {
             for (int i = 0; i < conversationProfile.Entries.Length; i++)
             {
                 ConversationEntryDefinition entry = conversationProfile.Entries[i];
+
                 if (entry == null)
                 {
                     continue;
@@ -188,6 +195,7 @@ public class NPCConversationComponent : MonoBehaviour
                 for (int j = 0; j < entry.followUpTopics.Length; j++)
                 {
                     ConversationTopicDefinition followUp = entry.followUpTopics[j];
+
                     if (followUp == null || !seen.Add(followUp))
                     {
                         continue;
@@ -200,6 +208,33 @@ public class NPCConversationComponent : MonoBehaviour
                     }
                 }
             }
+        }
+
+        return false;
+    }
+
+    private bool HasAvailableEntryForTopic(GameObject interactorObject, ConversationTopicDefinition topic)
+    {
+        if (conversationProfile == null || conversationProfile.Entries == null)
+        {
+            return true;
+        }
+
+        for (int i = 0; i < conversationProfile.Entries.Length; i++)
+        {
+            ConversationEntryDefinition entry = conversationProfile.Entries[i];
+
+            if (entry == null || entry.topic != topic)
+            {
+                continue;
+            }
+
+            if (entry.conditions != null && !entry.conditions.IsSatisfiedBy(interactorObject))
+            {
+                continue;
+            }
+
+            return true;
         }
 
         return false;
@@ -220,6 +255,7 @@ public class NPCConversationComponent : MonoBehaviour
         for (int i = 0; i < entries.Length; i++)
         {
             ConversationEntryDefinition candidate = entries[i];
+
             if (candidate == null)
             {
                 continue;
@@ -243,5 +279,20 @@ public class NPCConversationComponent : MonoBehaviour
         }
 
         return best;
+    }
+
+    private void ApplyEntryEffects(GameObject interactorObject, ConversationEntryDefinition entry)
+    {
+        if (interactorObject == null || entry == null || entry.effects == null)
+        {
+            return;
+        }
+
+        if (!entry.effects.HasAnyEffect)
+        {
+            return;
+        }
+
+        entry.effects.Apply(interactorObject);
     }
 }
