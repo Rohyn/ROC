@@ -1,74 +1,120 @@
-using UnityEngine;
-using UnityEngine.InputSystem;
 using Unity.Netcode;
 using Unity.Netcode.Components;
+using UnityEngine;
+using UnityEngine.InputSystem;
 using ROC.Statuses;
 
 /// <summary>
-/// First-pass server-authoritative player motor.
+/// Stage 1 server-authoritative player motor.
 ///
-/// DESIGN GOALS:
-/// - The owning client gathers input locally.
-/// - The owning client sends desired movement input to the server.
-/// - The server simulates movement using CharacterController.
-/// - NetworkTransform replicates the authoritative position to all clients.
+/// DESIGN:
+/// - The owning client gathers raw input locally.
+/// - The owning client submits raw movement input + intended yaw to the server.
+/// - The server validates input and simulates movement with CharacterController.
+/// - The server owns authoritative position and gameplay yaw.
+/// - NetworkTransform should replicate authoritative position.
+/// - Gameplay yaw is replicated through a server-written NetworkVariable.
 ///
-/// IMPORTANT:
-/// - This version intentionally focuses on authoritative POSITION first.
-/// - Rotation is left local for now so your direct-mouselook camera stays responsive.
-/// - That means NetworkTransform rotation sync should be disabled for now.
-/// - Later, we can make gameplay-facing authoritative too.
-///
-/// This script also reads server-side status flags/modifiers,
-/// which means once interactions are executed on the server,
-/// statuses like Resting can correctly block authoritative movement.
+/// DIRECT MOUSE-LOOK NOTE:
+/// - PlayerLookController may still rotate the owning client's root locally for responsive camera feel.
+/// - That local owner rotation is treated as presentation/input intent.
+/// - The server receives the requested yaw and uses it for authoritative movement/facing.
+/// - Non-owner clients apply the replicated gameplay yaw for remote visual facing.
 /// </summary>
+[DisallowMultipleComponent]
 [RequireComponent(typeof(CharacterController))]
 [RequireComponent(typeof(NetworkTransform))]
 public class NetworkPlayerMotor : NetworkBehaviour
 {
     [Header("Movement")]
-    [Tooltip("How fast the player moves on the ground in units per second.")]
+    [Tooltip("Base ground movement speed in units per second.")]
     [SerializeField] private float moveSpeed = 4.5f;
 
+    [Tooltip("If true, diagonal input is clamped to the same speed as cardinal movement.")]
+    [SerializeField] private bool clampDiagonalMovement = true;
+
     [Header("Jump / Gravity")]
-    [Tooltip("How high the player jumps in Unity units. Set to 0 to disable jumping for now.")]
+    [Tooltip("How high the player jumps in Unity units. Set to 0 to disable jumping.")]
     [SerializeField] private float jumpHeight = 1.2f;
 
-    [Tooltip("Gravity acceleration applied to the player. Negative value because down is negative Y.")]
+    [Tooltip("Gravity acceleration. Use a negative value.")]
     [SerializeField] private float gravity = -20f;
 
-    [Tooltip("Small downward force used while grounded to help the CharacterController stay snapped to the ground.")]
+    [Tooltip("Small downward force used while grounded to keep CharacterController snapped to ground.")]
     [SerializeField] private float groundedStickForce = -2f;
 
-    [Header("Camera Reference")]
-    [Tooltip("Optional explicit camera transform. If left empty, the script will try to use Camera.main.")]
-    [SerializeField] private Transform cameraTransformOverride;
+    [Header("Facing")]
+    [Tooltip("If true, the server applies gameplay yaw to the player root.")]
+    [SerializeField] private bool serverAppliesGameplayYawToRoot = true;
+
+    [Tooltip("If true, non-owner clients apply replicated gameplay yaw to the player root for remote visual facing.")]
+    [SerializeField] private bool nonOwnersApplyReplicatedYawToRoot = true;
+
+    [Tooltip("Minimum yaw delta before the server updates the replicated yaw variable.")]
+    [SerializeField] private float yawReplicationThresholdDegrees = 0.1f;
+
+    [Tooltip("Optional yaw rate limit. Set to 0 or less to disable. Direct mouse-look usually wants this disabled for now.")]
+    [SerializeField] private float maxYawDegreesPerSecond = 0f;
 
     [Header("Status Integration")]
-    [Tooltip("Optional reference to the StatusManager on this player. If left empty, the script will try to find one on the same GameObject.")]
+    [Tooltip("Optional StatusManager on this player. If empty, this script will look on the same GameObject.")]
     [SerializeField] private StatusManager statusManager;
 
     [Header("Debug")]
-    [Tooltip("If true, input submission and server movement events will be logged.")]
     [SerializeField] private bool verboseLogging = false;
 
     private CharacterController _characterController;
-    private Transform _cameraTransform;
 
-    // -----------------------------
-    // Local owner-collected input
-    // -----------------------------
+    // Server-authoritative gameplay yaw.
+    private readonly NetworkVariable<float> _gameplayYaw = new NetworkVariable<float>(
+        0f,
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Server);
+
+    // Local owner-collected input.
     private Vector2 _localMoveInput;
     private bool _localJumpQueued;
-    private Vector3 _localDesiredMoveWorld;
+    private uint _localInputSequence;
 
-    // -----------------------------
-    // Server-authoritative input state
-    // -----------------------------
-    private Vector3 _serverDesiredMoveWorld;
+    // Server-owned input state.
+    private Vector2 _serverMoveInput;
     private bool _serverJumpQueued;
+    private float _serverYawDegrees;
+    private float _lastYawInputReceiveTime;
+    private uint _lastProcessedInputSequence;
+
+    // Server-owned movement state.
     private float _verticalVelocity;
+
+    public float GameplayYawDegrees => _gameplayYaw.Value;
+
+    public Vector3 GameplayForward
+    {
+        get
+        {
+            float yaw = IsServer ? _serverYawDegrees : _gameplayYaw.Value;
+            return Quaternion.Euler(0f, yaw, 0f) * Vector3.forward;
+        }
+    }
+
+    public bool IsGrounded => _characterController != null && _characterController.isGrounded;
+
+    public float CurrentMoveSpeed
+    {
+        get
+        {
+            float modifier = 1f;
+
+            if (statusManager != null)
+            {
+                modifier = statusManager.GetMultiplicativeModifier(StatusModifierType.MoveSpeed);
+            }
+
+            return moveSpeed * Mathf.Max(0f, modifier);
+        }
+    }
+
+    public uint LastProcessedInputSequence => _lastProcessedInputSequence;
 
     private void Awake()
     {
@@ -76,7 +122,7 @@ public class NetworkPlayerMotor : NetworkBehaviour
 
         if (_characterController == null)
         {
-            Debug.LogError("[NetworkPlayerMotor] Missing CharacterController component.");
+            Debug.LogError("[NetworkPlayerMotor] Missing CharacterController.", this);
             enabled = false;
             return;
         }
@@ -89,55 +135,54 @@ public class NetworkPlayerMotor : NetworkBehaviour
 
     public override void OnNetworkSpawn()
     {
-        // We still need this component active on the server for authoritative simulation.
-        // Only pure non-owner clients can safely disable it.
-        if (!IsOwner && !IsServer)
+        if (IsServer)
         {
-            enabled = false;
-            return;
-        }
-
-        if (IsOwner)
-        {
-            CacheCameraReference();
+            _serverYawDegrees = NormalizeYaw(transform.eulerAngles.y);
+            _gameplayYaw.Value = _serverYawDegrees;
+            _lastYawInputReceiveTime = Time.time;
         }
     }
 
     private void Update()
     {
-        // Only the owning client should gather local input.
         if (!IsOwner)
         {
             return;
         }
 
-        if (_cameraTransform == null)
-        {
-            CacheCameraReference();
-        }
-
-        CollectLocalInput();
+        CollectOwnerInput();
     }
 
     private void FixedUpdate()
     {
-        // Owner sends latest input to authority.
         if (IsOwner)
         {
-            PushLocalInputToAuthority();
+            PushOwnerInputToServer();
         }
 
-        // Server simulates the authoritative movement.
         if (IsServer)
         {
-            SimulateAuthoritativeMovement(Time.fixedDeltaTime);
+            SimulateServerMovement(Time.fixedDeltaTime);
         }
     }
 
-    /// <summary>
-    /// Collects local owner input and converts movement into a world-space desired move vector.
-    /// </summary>
-    private void CollectLocalInput()
+    private void LateUpdate()
+    {
+        // Non-owner clients do not run local look.
+        // Apply replicated gameplay yaw so remote players face correctly
+        // even if NetworkTransform rotation sync is disabled.
+        if (!IsSpawned || IsServer || IsOwner)
+        {
+            return;
+        }
+
+        if (nonOwnersApplyReplicatedYawToRoot)
+        {
+            ApplyYawToRoot(_gameplayYaw.Value);
+        }
+    }
+
+    private void CollectOwnerInput()
     {
         _localMoveInput = ReadMoveInput();
 
@@ -146,80 +191,93 @@ public class NetworkPlayerMotor : NetworkBehaviour
         {
             _localJumpQueued = true;
         }
-
-        _localDesiredMoveWorld = CalculateCameraRelativeMoveWorld(_localMoveInput);
     }
 
-    /// <summary>
-    /// Sends the current local input state to the server.
-    ///
-    /// On host, we can assign directly without sending an RPC to ourselves.
-    /// </summary>
-    private void PushLocalInputToAuthority()
+    private void PushOwnerInputToServer()
     {
-        Vector3 desiredMoveWorld = _localDesiredMoveWorld;
+        Vector2 moveInput = clampDiagonalMovement
+            ? Vector2.ClampMagnitude(_localMoveInput, 1f)
+            : _localMoveInput;
+
+        float requestedYaw = NormalizeYaw(transform.eulerAngles.y);
         bool jumpPressed = _localJumpQueued;
+
+        _localInputSequence++;
 
         if (IsServer)
         {
-            _serverDesiredMoveWorld = desiredMoveWorld;
-
-            if (jumpPressed)
-            {
-                _serverJumpQueued = true;
-            }
+            ApplySubmittedInputOnServer(moveInput, requestedYaw, jumpPressed, _localInputSequence);
         }
         else
         {
-            SubmitMovementInputRpc(desiredMoveWorld, jumpPressed);
+            SubmitMovementInputRpc(moveInput, requestedYaw, jumpPressed, _localInputSequence);
         }
 
-        // Jump is a one-shot input. Once sent, clear the local queue.
         _localJumpQueued = false;
     }
 
-    /// <summary>
-    /// Client -> Server input submission.
-    ///
-    /// This is the core of the server-authoritative movement path:
-    /// the client sends desired movement, but only the server actually moves the player.
-    /// </summary>
     [Rpc(SendTo.Server)]
-    private void SubmitMovementInputRpc(Vector3 desiredMoveWorld, bool jumpPressed)
+    private void SubmitMovementInputRpc(
+        Vector2 moveInput,
+        float requestedYawDegrees,
+        bool jumpPressed,
+        uint inputSequence)
     {
-        // Flatten and clamp for safety.
-        desiredMoveWorld.y = 0f;
-        desiredMoveWorld = Vector3.ClampMagnitude(desiredMoveWorld, 1f);
+        ApplySubmittedInputOnServer(moveInput, requestedYawDegrees, jumpPressed, inputSequence);
+    }
 
-        _serverDesiredMoveWorld = desiredMoveWorld;
+    private void ApplySubmittedInputOnServer(
+        Vector2 moveInput,
+        float requestedYawDegrees,
+        bool jumpPressed,
+        uint inputSequence)
+    {
+        if (!IsServer)
+        {
+            return;
+        }
+
+        if (!IsFinite(moveInput) || !IsFinite(requestedYawDegrees))
+        {
+            if (verboseLogging)
+            {
+                Debug.LogWarning("[NetworkPlayerMotor] Rejected non-finite movement input.", this);
+            }
+
+            return;
+        }
+
+        _serverMoveInput = clampDiagonalMovement
+            ? Vector2.ClampMagnitude(moveInput, 1f)
+            : ClampAxes(moveInput, -1f, 1f);
+
+        float normalizedRequestedYaw = NormalizeYaw(requestedYawDegrees);
+        _serverYawDegrees = ValidateAndApplyYaw(normalizedRequestedYaw);
 
         if (jumpPressed)
         {
             _serverJumpQueued = true;
         }
 
+        _lastProcessedInputSequence = inputSequence;
+
+        ReplicateGameplayYawIfNeeded();
+
         if (verboseLogging)
         {
-            Debug.Log($"[NetworkPlayerMotor] Server received input. Move={desiredMoveWorld}, Jump={jumpPressed}");
+            Debug.Log(
+                $"[NetworkPlayerMotor] Input seq={inputSequence} move={_serverMoveInput} yaw={_serverYawDegrees:F1} jump={jumpPressed}",
+                this);
         }
     }
 
-    /// <summary>
-    /// Runs only on the server and applies authoritative movement.
-    /// </summary>
-    private void SimulateAuthoritativeMovement(float deltaTime)
+    private void SimulateServerMovement(float deltaTime)
     {
         bool noMovement = statusManager != null && statusManager.HasFlag(StatusFlags.NoMovement);
 
-        float movementMultiplier = 1f;
-        if (statusManager != null)
-        {
-            movementMultiplier = statusManager.GetMultiplicativeModifier(StatusModifierType.MoveSpeed);
-        }
-
         Vector3 moveDirection = noMovement
             ? Vector3.zero
-            : Vector3.ClampMagnitude(_serverDesiredMoveWorld, 1f);
+            : CalculateMoveWorldFromInputAndYaw(_serverMoveInput, _serverYawDegrees);
 
         HandleGroundingAndGravity(deltaTime);
 
@@ -228,19 +286,107 @@ public class NetworkPlayerMotor : NetworkBehaviour
             HandleJumpServer();
         }
 
-        Vector3 finalVelocity =
-            (moveDirection * moveSpeed * movementMultiplier) +
-            (Vector3.up * _verticalVelocity);
+        Vector3 horizontalVelocity = moveDirection * CurrentMoveSpeed;
+        Vector3 verticalVelocity = Vector3.up * _verticalVelocity;
+        Vector3 finalVelocity = horizontalVelocity + verticalVelocity;
 
         _characterController.Move(finalVelocity * deltaTime);
 
-        // Jump is also one-shot on the server side.
+        if (serverAppliesGameplayYawToRoot)
+        {
+            ApplyYawToRoot(_serverYawDegrees);
+        }
+
+        ReplicateGameplayYawIfNeeded();
+
         _serverJumpQueued = false;
     }
 
-    /// <summary>
-    /// Reads simple WASD movement input using the Input System package directly.
-    /// </summary>
+    private Vector3 CalculateMoveWorldFromInputAndYaw(Vector2 moveInput, float yawDegrees)
+    {
+        Vector2 input = clampDiagonalMovement
+            ? Vector2.ClampMagnitude(moveInput, 1f)
+            : ClampAxes(moveInput, -1f, 1f);
+
+        Quaternion yawRotation = Quaternion.Euler(0f, yawDegrees, 0f);
+
+        Vector3 forward = yawRotation * Vector3.forward;
+        Vector3 right = yawRotation * Vector3.right;
+
+        Vector3 moveDirection = (forward * input.y) + (right * input.x);
+
+        if (clampDiagonalMovement)
+        {
+            moveDirection = Vector3.ClampMagnitude(moveDirection, 1f);
+        }
+
+        moveDirection.y = 0f;
+        return moveDirection;
+    }
+
+    private void HandleGroundingAndGravity(float deltaTime)
+    {
+        if (_characterController.isGrounded && _verticalVelocity < 0f)
+        {
+            _verticalVelocity = groundedStickForce;
+        }
+
+        _verticalVelocity += gravity * deltaTime;
+    }
+
+    private void HandleJumpServer()
+    {
+        if (jumpHeight <= 0f)
+        {
+            return;
+        }
+
+        if (_serverJumpQueued && _characterController.isGrounded)
+        {
+            _verticalVelocity = Mathf.Sqrt(jumpHeight * -2f * gravity);
+        }
+    }
+
+    private float ValidateAndApplyYaw(float requestedYawDegrees)
+    {
+        if (maxYawDegreesPerSecond <= 0f)
+        {
+            _lastYawInputReceiveTime = Time.time;
+            return requestedYawDegrees;
+        }
+
+        float now = Time.time;
+        float elapsed = Mathf.Max(0.001f, now - _lastYawInputReceiveTime);
+        _lastYawInputReceiveTime = now;
+
+        float maxDelta = maxYawDegreesPerSecond * elapsed;
+        float currentYaw = _serverYawDegrees;
+        float delta = Mathf.DeltaAngle(currentYaw, requestedYawDegrees);
+        float clampedDelta = Mathf.Clamp(delta, -maxDelta, maxDelta);
+
+        return NormalizeYaw(currentYaw + clampedDelta);
+    }
+
+    private void ReplicateGameplayYawIfNeeded()
+    {
+        if (!IsServer)
+        {
+            return;
+        }
+
+        if (Mathf.Abs(Mathf.DeltaAngle(_gameplayYaw.Value, _serverYawDegrees)) < yawReplicationThresholdDegrees)
+        {
+            return;
+        }
+
+        _gameplayYaw.Value = _serverYawDegrees;
+    }
+
+    private void ApplyYawToRoot(float yawDegrees)
+    {
+        transform.rotation = Quaternion.Euler(0f, NormalizeYaw(yawDegrees), 0f);
+    }
+
     private Vector2 ReadMoveInput()
     {
         Vector2 input = Vector2.zero;
@@ -271,79 +417,42 @@ public class NetworkPlayerMotor : NetworkBehaviour
             input.x -= 1f;
         }
 
-        input = Vector2.ClampMagnitude(input, 1f);
-        return input;
+        return clampDiagonalMovement
+            ? Vector2.ClampMagnitude(input, 1f)
+            : ClampAxes(input, -1f, 1f);
     }
 
-    /// <summary>
-    /// Converts 2D movement input into a camera-relative world-space move direction.
-    ///
-    /// Because the server does not know the client's camera orientation,
-    /// we do this conversion locally on the owning client and send the resulting world-space direction.
-    /// </summary>
-    private Vector3 CalculateCameraRelativeMoveWorld(Vector2 moveInput)
+    private static Vector2 ClampAxes(Vector2 value, float min, float max)
     {
-        Transform referenceTransform = _cameraTransform != null ? _cameraTransform : transform;
-
-        Vector3 forward = referenceTransform.forward;
-        forward.y = 0f;
-        forward.Normalize();
-
-        Vector3 right = referenceTransform.right;
-        right.y = 0f;
-        right.Normalize();
-
-        Vector3 moveDirection =
-            (forward * moveInput.y) +
-            (right * moveInput.x);
-
-        moveDirection = Vector3.ClampMagnitude(moveDirection, 1f);
-        return moveDirection;
+        value.x = Mathf.Clamp(value.x, min, max);
+        value.y = Mathf.Clamp(value.y, min, max);
+        return value;
     }
 
-    /// <summary>
-    /// Handles grounded state and gravity accumulation on the server.
-    /// </summary>
-    private void HandleGroundingAndGravity(float deltaTime)
+    private static bool IsFinite(Vector2 value)
     {
-        if (_characterController.isGrounded)
-        {
-            if (_verticalVelocity < 0f)
-            {
-                _verticalVelocity = groundedStickForce;
-            }
-        }
-
-        _verticalVelocity += gravity * deltaTime;
+        return IsFinite(value.x) && IsFinite(value.y);
     }
 
-    /// <summary>
-    /// Applies jump on the server if queued and grounded.
-    /// </summary>
-    private void HandleJumpServer()
+    private static bool IsFinite(float value)
     {
-        if (jumpHeight <= 0f)
-        {
-            return;
-        }
-
-        if (_serverJumpQueued && _characterController.isGrounded)
-        {
-            _verticalVelocity = Mathf.Sqrt(jumpHeight * -2f * gravity);
-        }
+        return !float.IsNaN(value) && !float.IsInfinity(value);
     }
 
-    private void CacheCameraReference()
+    private static float NormalizeYaw(float yawDegrees)
     {
-        if (cameraTransformOverride != null)
+        if (!IsFinite(yawDegrees))
         {
-            _cameraTransform = cameraTransformOverride;
-            return;
+            return 0f;
         }
 
-        if (Camera.main != null)
+        yawDegrees %= 360f;
+
+        if (yawDegrees < 0f)
         {
-            _cameraTransform = Camera.main.transform;
+            yawDegrees += 360f;
         }
+
+        return yawDegrees;
     }
 }

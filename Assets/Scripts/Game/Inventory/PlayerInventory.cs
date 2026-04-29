@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using ROC.Persistence;
 using Unity.Collections;
 using Unity.Netcode;
 using UnityEngine;
@@ -11,14 +13,18 @@ namespace ROC.Inventory
     /// - equipped items
     ///
     /// DESIGN:
-    /// - Server owns and mutates both collections
-    /// - Clients receive replicated read-only views through NetworkList
-    /// - Client UI can request equip/unequip through RPCs on the owning player's inventory
+    /// - Server owns and mutates both collections.
+    /// - Clients receive replicated read-only views through NetworkList.
+    /// - Client UI can request equip/unequip through RPCs on the owning player's inventory.
     ///
     /// CURRENT SCOPE:
     /// - add/remove items from bags
     /// - move one quantity of an equippable item from bag -> equipped
     /// - move one quantity from equipped -> bag
+    ///
+    /// PERSISTENCE:
+    /// - Save/load methods mutate replicated lists directly.
+    /// - Save/load does not emit quest gameplay events.
     ///
     /// INTENTIONAL LIMITATIONS:
     /// - no equipment slot rules yet
@@ -85,6 +91,7 @@ namespace ROC.Inventory
 
         /// <summary>
         /// Server-only add item to BAGS.
+        /// Emits an item-added quest gameplay event.
         /// </summary>
         public bool AddItem(ItemDefinition itemDefinition, int quantity = 1)
         {
@@ -128,6 +135,7 @@ namespace ROC.Inventory
 
         /// <summary>
         /// Server-only remove item from BAGS.
+        /// Emits an item-removed quest gameplay event.
         /// </summary>
         public bool RemoveItem(ItemDefinition itemDefinition, int quantity = 1)
         {
@@ -269,6 +277,7 @@ namespace ROC.Inventory
         /// <summary>
         /// Server-only equip logic.
         /// Moves one quantity from bag -> equipped if the item is equippable.
+        /// Emits an item-equipped quest gameplay event.
         /// </summary>
         private bool EquipItemServer(string itemId)
         {
@@ -337,6 +346,7 @@ namespace ROC.Inventory
         /// <summary>
         /// Server-only unequip logic.
         /// Moves one quantity from equipped -> bag.
+        /// Emits an item-unequipped quest gameplay event.
         /// </summary>
         private bool UnequipItemServer(string itemId)
         {
@@ -451,6 +461,64 @@ namespace ROC.Inventory
         }
 
         // ---------------------------------------------------------------------
+        // Persistence API
+        // ---------------------------------------------------------------------
+
+        /// <summary>
+        /// Server-only save loading.
+        /// Replaces current bag/equipped state with saved state.
+        ///
+        /// Important:
+        /// - This does NOT emit quest gameplay events.
+        /// - Save loading is state restoration, not gameplay acquisition/equip action.
+        /// </summary>
+        public void ApplySaveDataServer(
+            IReadOnlyList<InventoryItemSaveData> bagItems,
+            IReadOnlyList<InventoryItemSaveData> equippedItems)
+        {
+            if (!IsServer)
+            {
+                Debug.LogWarning("[PlayerInventory] ApplySaveDataServer called on non-server instance.", this);
+                return;
+            }
+
+            _bagItems.Clear();
+            _equippedItems.Clear();
+
+            LoadSaveItemsIntoList(_bagItems, bagItems);
+            LoadSaveItemsIntoList(_equippedItems, equippedItems);
+
+            InventoryChanged?.Invoke();
+        }
+
+        public List<InventoryItemSaveData> CreateInventorySaveData(InventoryCollection collection)
+        {
+            NetworkList<ReplicatedInventoryEntry> list = GetList(collection);
+            List<InventoryItemSaveData> result = new List<InventoryItemSaveData>(list.Count);
+
+            for (int i = 0; i < list.Count; i++)
+            {
+                ReplicatedInventoryEntry entry = list[i];
+
+                string itemId = entry.ItemId.ToString();
+                int quantity = entry.Quantity;
+
+                if (string.IsNullOrWhiteSpace(itemId) || quantity <= 0)
+                {
+                    continue;
+                }
+
+                result.Add(new InventoryItemSaveData
+                {
+                    ItemId = itemId,
+                    Quantity = quantity
+                });
+            }
+
+            return result;
+        }
+
+        // ---------------------------------------------------------------------
         // Internal helpers
         // ---------------------------------------------------------------------
 
@@ -527,6 +595,39 @@ namespace ROC.Inventory
             }
 
             return false;
+        }
+
+        private void LoadSaveItemsIntoList(
+            NetworkList<ReplicatedInventoryEntry> list,
+            IReadOnlyList<InventoryItemSaveData> saveItems)
+        {
+            if (saveItems == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < saveItems.Count; i++)
+            {
+                InventoryItemSaveData saveItem = saveItems[i];
+
+                if (saveItem == null)
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(saveItem.ItemId) || saveItem.Quantity <= 0)
+                {
+                    continue;
+                }
+
+                if (itemCatalog != null && !itemCatalog.TryGetDefinition(saveItem.ItemId, out ItemDefinition _))
+                {
+                    Debug.LogWarning($"[PlayerInventory] Save contains unknown item '{saveItem.ItemId}'. Skipping.", this);
+                    continue;
+                }
+
+                AddToList(list, saveItem.ItemId, saveItem.Quantity);
+            }
         }
 
         private bool TryResolveItemDefinition(string itemId, out ItemDefinition itemDefinition)

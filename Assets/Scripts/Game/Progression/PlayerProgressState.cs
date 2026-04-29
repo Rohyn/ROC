@@ -8,13 +8,13 @@ using UnityEngine;
 /// Server-authoritative per-player progression flag state.
 ///
 /// PURPOSE:
-/// - Track non-inventory, non-equipment progression/state flags
+/// - Track non-inventory, non-equipment progression/state flags.
 /// - Drive tutorial flow, quest flow, ritual order, unlock steps, etc.
 ///
 /// DESIGN:
-/// - Server owns and mutates flags
-/// - Clients receive a replicated read-only view
-/// - Local lookups use a HashSet for fast checks
+/// - Server owns and mutates flags.
+/// - Clients receive a replicated read-only view.
+/// - Local lookups use a HashSet for fast checks.
 ///
 /// EXAMPLES:
 /// - intro.stood_up
@@ -24,6 +24,10 @@ using UnityEngine;
 /// IMPORTANT:
 /// This is intentionally separate from inventory.
 /// Hidden inventory items are not the right representation for tutorial/quest flow.
+///
+/// PERSISTENCE:
+/// - Save/load methods restore replicated flag state directly.
+/// - Save loading does not represent gameplay progress being newly earned.
 /// </summary>
 [DisallowMultipleComponent]
 [RequireComponent(typeof(NetworkObject))]
@@ -144,6 +148,7 @@ public class PlayerProgressState : NetworkBehaviour
 
     /// <summary>
     /// Server-only.
+    /// Grants all valid flags in the provided collection.
     /// </summary>
     public int GrantFlags(IEnumerable<string> flagIds)
     {
@@ -186,17 +191,19 @@ public class PlayerProgressState : NetworkBehaviour
 
         for (int i = 0; i < _replicatedFlags.Count; i++)
         {
-            if (_replicatedFlags[i].Equals(fixedFlag))
+            if (!_replicatedFlags[i].Equals(fixedFlag))
             {
-                _replicatedFlags.RemoveAt(i);
-
-                if (verboseLogging)
-                {
-                    Debug.Log($"[PlayerProgressState] Revoked flag '{flagId}'.", this);
-                }
-
-                return true;
+                continue;
             }
+
+            _replicatedFlags.RemoveAt(i);
+
+            if (verboseLogging)
+            {
+                Debug.Log($"[PlayerProgressState] Revoked flag '{flagId}'.", this);
+            }
+
+            return true;
         }
 
         return false;
@@ -206,7 +213,7 @@ public class PlayerProgressState : NetworkBehaviour
     /// Server-only.
     /// Revokes all flags whose ID starts with the given prefix.
     ///
-    /// Example:
+    /// Examples:
     /// - RevokeFlagsByPrefix("intro.")
     /// - RevokeFlagsByPrefix("quest.bandits.")
     /// </summary>
@@ -228,6 +235,7 @@ public class PlayerProgressState : NetworkBehaviour
         for (int i = _replicatedFlags.Count - 1; i >= 0; i--)
         {
             string flag = _replicatedFlags[i].ToString();
+
             if (!flag.StartsWith(prefix, StringComparison.Ordinal))
             {
                 continue;
@@ -243,6 +251,77 @@ public class PlayerProgressState : NetworkBehaviour
         }
 
         return removed;
+    }
+
+    // ---------------------------------------------------------------------
+    // Persistence API
+    // ---------------------------------------------------------------------
+
+    public List<string> CreateFlagSaveData()
+    {
+        List<string> result = new List<string>();
+
+        for (int i = 0; i < _replicatedFlags.Count; i++)
+        {
+            string flag = _replicatedFlags[i].ToString();
+
+            if (string.IsNullOrWhiteSpace(flag))
+            {
+                continue;
+            }
+
+            if (result.Contains(flag))
+            {
+                continue;
+            }
+
+            result.Add(flag);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Server-only save loading.
+    /// Replaces current flags with saved flags.
+    /// </summary>
+    public void ReplaceFlagsFromSaveServer(IEnumerable<string> flags)
+    {
+        if (!IsServer)
+        {
+            Debug.LogWarning("[PlayerProgressState] ReplaceFlagsFromSaveServer called on non-server instance.", this);
+            return;
+        }
+
+        _replicatedFlags.Clear();
+        _localFlags.Clear();
+
+        if (flags != null)
+        {
+            foreach (string flagId in flags)
+            {
+                if (string.IsNullOrWhiteSpace(flagId))
+                {
+                    continue;
+                }
+
+                if (_localFlags.Contains(flagId))
+                {
+                    continue;
+                }
+
+                _localFlags.Add(flagId);
+                _replicatedFlags.Add(new FixedString64Bytes(flagId));
+            }
+        }
+
+        RebuildLocalFlags();
+        FlagsChanged?.Invoke();
+
+        if (verboseLogging)
+        {
+            Debug.Log($"[PlayerProgressState] Loaded {_localFlags.Count} saved flag(s).", this);
+        }
     }
 
     private void HandleFlagsChanged(NetworkListEvent<FixedString64Bytes> changeEvent)
