@@ -1420,7 +1420,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6a4f664205ecc5b448cb1fd030d08e00, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::InteractableAvailabilityRules
-  requiredProgressFlags: []
+  requiredProgressFlags:
+  - intro.got_quest
   blockedProgressFlags: []
   requiredBagItems: []
   requiredEquippedItems:

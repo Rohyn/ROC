@@ -7,6 +7,15 @@ using UnityEngine;
 
 /// <summary>
 /// Server-authoritative quest log for one player.
+///
+/// RESPONSIBILITIES:
+/// - accept quests
+/// - track active runtime quest instances
+/// - track completed quest history by definition id
+/// - consume normalized gameplay events
+/// - auto-complete quests when appropriate
+/// - emit quest accept/complete gameplay events, including quest tags
+/// - publish an owner-only journal snapshot for UI
 /// </summary>
 [DisallowMultipleComponent]
 [RequireComponent(typeof(NetworkObject))]
@@ -28,7 +37,6 @@ public class PlayerQuestLog : NetworkBehaviour
 
     public IReadOnlyList<QuestInstance> ActiveQuests => activeQuests;
     public IReadOnlyList<string> CompletedQuestDefinitionIds => completedQuestDefinitionIds;
-
     public IReadOnlyList<QuestJournalEntryData> JournalActiveQuests => _journalActiveQuests;
     public IReadOnlyList<string> JournalCompletedQuestIds => _journalCompletedQuestIds;
 
@@ -130,6 +138,7 @@ public class PlayerQuestLog : NetworkBehaviour
 
         QuestInstance instance = new QuestInstance(definition);
         instance.RefreshStateDrivenObjectives(gameObject);
+
         activeQuests.Add(instance);
 
         if (verboseLogging)
@@ -137,10 +146,17 @@ public class PlayerQuestLog : NetworkBehaviour
             Debug.Log($"[PlayerQuestLog] Accepted quest '{definition.Title}' ({definition.QuestId}).", this);
         }
 
-        RecordGameplayEventInternal(GameplayEventData.CreateQuestAcceptedEvent(definition, instance.InstanceId));
+        bool changed = true;
 
-        ProcessCompletedStates();
-        RaiseQuestLogChanged();
+        changed |= RecordGameplayEventInternal(
+            GameplayEventData.CreateQuestAcceptedEvent(definition, instance.InstanceId));
+
+        changed |= ProcessCompletedStates();
+
+        if (changed)
+        {
+            RaiseQuestLogChanged();
+        }
 
         return true;
     }
@@ -160,8 +176,15 @@ public class PlayerQuestLog : NetworkBehaviour
             return false;
         }
 
-        CompleteQuestInternal(instance, emitQuestCompletedEvent: true, emitQuestTurnedInEvent: true);
-        RaiseQuestLogChanged();
+        bool changed = CompleteQuestInternal(
+            instance,
+            emitQuestCompletedEvent: true,
+            emitQuestTurnedInEvent: true);
+
+        if (changed)
+        {
+            RaiseQuestLogChanged();
+        }
 
         return true;
     }
@@ -203,6 +226,12 @@ public class PlayerQuestLog : NetworkBehaviour
         return false;
     }
 
+    /// <summary>
+    /// Server-only entry point for gameplay event ingestion.
+    ///
+    /// This now raises QuestLogChanged only when the event actually changed quest state.
+    /// Irrelevant events no longer trigger journal snapshots or save debounce work.
+    /// </summary>
     public void RecordGameplayEvent(GameplayEventData eventData)
     {
         if (!IsServer)
@@ -211,9 +240,13 @@ public class PlayerQuestLog : NetworkBehaviour
             return;
         }
 
-        RecordGameplayEventInternal(eventData);
-        ProcessCompletedStates();
-        RaiseQuestLogChanged();
+        bool changed = RecordGameplayEventInternal(eventData);
+        changed |= ProcessCompletedStates();
+
+        if (changed)
+        {
+            RaiseQuestLogChanged();
+        }
     }
 
     public void RequestQuestJournalSnapshot()
@@ -322,7 +355,7 @@ public class PlayerQuestLog : NetworkBehaviour
 
     public List<QuestSaveData> CreateActiveQuestSaveData()
     {
-        List<QuestSaveData> result = new List<QuestSaveData>();
+        List<QuestSaveData> result = new();
 
         for (int i = 0; i < activeQuests.Count; i++)
         {
@@ -341,7 +374,7 @@ public class PlayerQuestLog : NetworkBehaviour
 
     public List<string> CreateCompletedQuestSaveData()
     {
-        List<string> result = new List<string>();
+        List<string> result = new();
 
         for (int i = 0; i < completedQuestDefinitionIds.Count; i++)
         {
@@ -361,11 +394,11 @@ public class PlayerQuestLog : NetworkBehaviour
         return result;
     }
 
-    private void RecordGameplayEventInternal(GameplayEventData eventData)
+    private bool RecordGameplayEventInternal(GameplayEventData eventData)
     {
         if (eventData == null)
         {
-            return;
+            return false;
         }
 
         if (verboseLogging)
@@ -396,10 +429,14 @@ public class PlayerQuestLog : NetworkBehaviour
         {
             Debug.Log("[PlayerQuestLog] One or more active quests changed progress.", this);
         }
+
+        return anyChanged;
     }
 
-    private void ProcessCompletedStates()
+    private bool ProcessCompletedStates()
     {
+        bool changed = false;
+
         for (int i = activeQuests.Count - 1; i >= 0; i--)
         {
             QuestInstance instance = activeQuests[i];
@@ -407,35 +444,52 @@ public class PlayerQuestLog : NetworkBehaviour
             if (instance == null)
             {
                 activeQuests.RemoveAt(i);
+                changed = true;
                 continue;
             }
 
             if (instance.State == QuestInstance.QuestInstanceState.Completed)
             {
-                CompleteQuestInternal(instance, emitQuestCompletedEvent: true, emitQuestTurnedInEvent: false);
+                changed |= CompleteQuestInternal(
+                    instance,
+                    emitQuestCompletedEvent: true,
+                    emitQuestTurnedInEvent: false);
             }
         }
+
+        return changed;
     }
 
-    private void CompleteQuestInternal(
+    private bool CompleteQuestInternal(
         QuestInstance instance,
         bool emitQuestCompletedEvent,
         bool emitQuestTurnedInEvent)
     {
         if (instance == null || instance.Definition == null)
         {
-            return;
+            return false;
         }
 
         string questId = NormalizeId(instance.Definition.QuestId);
         string questTitle = instance.Definition.Title;
 
-        instance.MarkCompleted();
-        activeQuests.Remove(instance);
+        bool changed = false;
+
+        if (instance.State != QuestInstance.QuestInstanceState.Completed)
+        {
+            instance.MarkCompleted();
+            changed = true;
+        }
+
+        if (activeQuests.Remove(instance))
+        {
+            changed = true;
+        }
 
         if (!completedQuestDefinitionIds.Contains(questId))
         {
             completedQuestDefinitionIds.Add(questId);
+            changed = true;
         }
 
         if (instance.Definition.Rewards != null)
@@ -450,13 +504,17 @@ public class PlayerQuestLog : NetworkBehaviour
 
         if (emitQuestCompletedEvent)
         {
-            RecordGameplayEventInternal(GameplayEventData.CreateQuestCompletedEvent(instance.Definition, instance.InstanceId));
+            changed |= RecordGameplayEventInternal(
+                GameplayEventData.CreateQuestCompletedEvent(instance.Definition, instance.InstanceId));
         }
 
         if (emitQuestTurnedInEvent)
         {
-            RecordGameplayEventInternal(GameplayEventData.CreateQuestTurnedInEvent(instance.Definition, instance.InstanceId));
+            changed |= RecordGameplayEventInternal(
+                GameplayEventData.CreateQuestTurnedInEvent(instance.Definition, instance.InstanceId));
         }
+
+        return changed;
     }
 
     private QuestInstance FindActiveQuestInstance(string questId)
@@ -511,7 +569,7 @@ public class PlayerQuestLog : NetworkBehaviour
 
     private QuestJournalEntryNet[] BuildActiveQuestSnapshot()
     {
-        List<QuestJournalEntryNet> result = new List<QuestJournalEntryNet>();
+        List<QuestJournalEntryNet> result = new();
 
         for (int i = 0; i < activeQuests.Count; i++)
         {
@@ -543,7 +601,7 @@ public class PlayerQuestLog : NetworkBehaviour
 
     private FixedString64Bytes[] BuildCompletedQuestSnapshot()
     {
-        List<FixedString64Bytes> result = new List<FixedString64Bytes>();
+        List<FixedString64Bytes> result = new();
 
         for (int i = 0; i < completedQuestDefinitionIds.Count; i++)
         {
@@ -660,9 +718,7 @@ public class PlayerQuestLog : NetworkBehaviour
 
     private static string NormalizeId(string value)
     {
-        return string.IsNullOrWhiteSpace(value)
-            ? string.Empty
-            : value.Trim();
+        return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
     }
 
     private static string Truncate(string value, int maxLength)
