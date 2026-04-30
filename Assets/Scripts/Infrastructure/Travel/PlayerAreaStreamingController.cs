@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -16,6 +17,11 @@ using UnityEngine.SceneManagement;
 /// The player object itself should stay persistent.
 /// Do not move the player GameObject into additive area scenes.
 /// Area scene membership is tracked logically through CurrentAreaSceneName.
+///
+/// OWNER CLEANUP:
+/// On reconnect, a client may synchronize/load multiple gameplay area scenes
+/// if the server currently has them loaded. Whenever this owner restores/finalizes
+/// its current area, unload all other currently loaded gameplay area scenes.
 /// </summary>
 [DisallowMultipleComponent]
 [RequireComponent(typeof(NetworkObject))]
@@ -23,10 +29,20 @@ public class PlayerAreaStreamingController : NetworkBehaviour
 {
     [Header("Initial Area")]
     [Tooltip("The area scene the player begins in after the initial synchronized spawn.")]
-    [SerializeField] private string initialAreaSceneName = "Intro";
+    [SerializeField] private string initialAreaSceneName = "Area_Intro";
+
+    [Header("Owner Area Scene Cleanup")]
+    [Tooltip("If true, the owner client unloads other loaded gameplay area scenes after the desired area is ready.")]
+    [SerializeField] private bool cleanupOtherAreaScenesOnOwner = true;
+
+    [Tooltip("Loaded scenes whose names start with this prefix are considered gameplay area scenes.")]
+    [SerializeField] private string gameplayAreaSceneNamePrefix = "Area_";
+
+    [Tooltip("Optional explicit gameplay area scene names. Useful for legacy scenes or exceptions.")]
+    [SerializeField] private string[] explicitGameplayAreaSceneNames = new string[0];
 
     [Header("Client Unload Behavior")]
-    [Tooltip("If true, the owner client unloads the previous area scene after the new one is ready.")]
+    [Tooltip("If true, the owner client also attempts to unload the previous area scene during normal transfers.")]
     [SerializeField] private bool unloadPreviousAreaOnOwner = true;
 
     [Header("Debug")]
@@ -224,57 +240,24 @@ public class PlayerAreaStreamingController : NetworkBehaviour
         string previousAreaSceneName,
         bool shouldUnloadPreviousArea)
     {
-        if (!string.IsNullOrWhiteSpace(areaSceneName))
-        {
-            Scene destinationScene = SceneManager.GetSceneByName(areaSceneName);
-
-            if (!destinationScene.IsValid() || !destinationScene.isLoaded)
-            {
-                AsyncOperation loadOperation = SceneManager.LoadSceneAsync(areaSceneName, LoadSceneMode.Additive);
-
-                if (loadOperation != null)
-                {
-                    while (!loadOperation.isDone)
-                    {
-                        yield return null;
-                    }
-                }
-            }
-
-            Scene loadedDestinationScene = SceneManager.GetSceneByName(areaSceneName);
-
-            if (loadedDestinationScene.IsValid() && loadedDestinationScene.isLoaded)
-            {
-                SceneManager.SetActiveScene(loadedDestinationScene);
-            }
-        }
+        yield return EnsureOwnerAreaSceneLoadedAndActive(areaSceneName);
 
         _currentAreaSceneName = areaSceneName;
 
-        if (shouldUnloadPreviousArea &&
-            !string.IsNullOrWhiteSpace(previousAreaSceneName) &&
-            previousAreaSceneName != areaSceneName)
+        if (shouldUnloadPreviousArea)
         {
-            Scene previousScene = SceneManager.GetSceneByName(previousAreaSceneName);
+            yield return UnloadOwnerSceneIfLoaded(previousAreaSceneName, areaSceneName);
+        }
 
-            if (previousScene.IsValid() && previousScene.isLoaded)
-            {
-                AsyncOperation unloadOperation = SceneManager.UnloadSceneAsync(previousAreaSceneName);
-
-                if (unloadOperation != null)
-                {
-                    while (!unloadOperation.isDone)
-                    {
-                        yield return null;
-                    }
-                }
-            }
+        if (cleanupOtherAreaScenesOnOwner)
+        {
+            yield return CleanupOtherLoadedAreaScenes(areaSceneName);
         }
 
         if (verboseLogging)
         {
             Debug.Log(
-                $"[PlayerAreaStreamingController] Owner restored persisted area '{areaSceneName}'. Previous='{previousAreaSceneName}'.",
+                $"[PlayerAreaStreamingController] Owner restored area '{areaSceneName}'. Previous='{previousAreaSceneName}'.",
                 this);
         }
     }
@@ -299,30 +282,7 @@ public class PlayerAreaStreamingController : NetworkBehaviour
         string previousAreaSceneName,
         string spawnPointId)
     {
-        if (!string.IsNullOrWhiteSpace(destinationSceneName))
-        {
-            Scene destinationScene = SceneManager.GetSceneByName(destinationSceneName);
-
-            if (!destinationScene.IsValid() || !destinationScene.isLoaded)
-            {
-                AsyncOperation loadOperation = SceneManager.LoadSceneAsync(destinationSceneName, LoadSceneMode.Additive);
-
-                if (loadOperation != null)
-                {
-                    while (!loadOperation.isDone)
-                    {
-                        yield return null;
-                    }
-                }
-            }
-
-            Scene loadedDestinationScene = SceneManager.GetSceneByName(destinationSceneName);
-
-            if (loadedDestinationScene.IsValid() && loadedDestinationScene.isLoaded)
-            {
-                SceneManager.SetActiveScene(loadedDestinationScene);
-            }
-        }
+        yield return EnsureOwnerAreaSceneLoadedAndActive(destinationSceneName);
 
         if (verboseLogging)
         {
@@ -375,12 +335,7 @@ public class PlayerAreaStreamingController : NetworkBehaviour
     {
         _currentAreaSceneName = newAreaSceneName;
 
-        Scene newScene = SceneManager.GetSceneByName(newAreaSceneName);
-
-        if (newScene.IsValid() && newScene.isLoaded)
-        {
-            SceneManager.SetActiveScene(newScene);
-        }
+        yield return EnsureOwnerAreaSceneLoadedAndActive(newAreaSceneName);
 
         CharacterController characterController = GetComponent<CharacterController>();
 
@@ -410,30 +365,20 @@ public class PlayerAreaStreamingController : NetworkBehaviour
                 this);
         }
 
-        if (shouldUnloadPreviousArea &&
-            !string.IsNullOrWhiteSpace(previousAreaSceneName) &&
-            previousAreaSceneName != newAreaSceneName)
+        if (shouldUnloadPreviousArea)
         {
-            Scene previousScene = SceneManager.GetSceneByName(previousAreaSceneName);
+            yield return UnloadOwnerSceneIfLoaded(previousAreaSceneName, newAreaSceneName);
+        }
 
-            if (previousScene.IsValid() && previousScene.isLoaded)
-            {
-                AsyncOperation unloadOperation = SceneManager.UnloadSceneAsync(previousAreaSceneName);
-
-                if (unloadOperation != null)
-                {
-                    while (!unloadOperation.isDone)
-                    {
-                        yield return null;
-                    }
-                }
-            }
+        if (cleanupOtherAreaScenesOnOwner)
+        {
+            yield return CleanupOtherLoadedAreaScenes(newAreaSceneName);
         }
 
         if (verboseLogging)
         {
             Debug.Log(
-                $"[PlayerAreaStreamingController] Owner local player position after previous scene unload: {transform.position}",
+                $"[PlayerAreaStreamingController] Owner local player position after area cleanup: {transform.position}",
                 this);
         }
 
@@ -456,5 +401,178 @@ public class PlayerAreaStreamingController : NetworkBehaviour
         {
             Debug.Log("[PlayerAreaStreamingController] Owner transfer aborted.", this);
         }
+    }
+
+    private IEnumerator EnsureOwnerAreaSceneLoadedAndActive(string areaSceneName)
+    {
+        if (string.IsNullOrWhiteSpace(areaSceneName))
+        {
+            yield break;
+        }
+
+        Scene destinationScene = SceneManager.GetSceneByName(areaSceneName);
+
+        if (!destinationScene.IsValid() || !destinationScene.isLoaded)
+        {
+            AsyncOperation loadOperation = SceneManager.LoadSceneAsync(areaSceneName, LoadSceneMode.Additive);
+
+            if (loadOperation == null)
+            {
+                Debug.LogError($"[PlayerAreaStreamingController] Failed to start loading area scene '{areaSceneName}'.", this);
+                yield break;
+            }
+
+            while (!loadOperation.isDone)
+            {
+                yield return null;
+            }
+        }
+
+        Scene loadedScene = SceneManager.GetSceneByName(areaSceneName);
+
+        if (loadedScene.IsValid() && loadedScene.isLoaded)
+        {
+            SceneManager.SetActiveScene(loadedScene);
+        }
+        else
+        {
+            Debug.LogWarning($"[PlayerAreaStreamingController] Area scene '{areaSceneName}' was not loaded successfully.", this);
+        }
+    }
+
+    private IEnumerator CleanupOtherLoadedAreaScenes(string keepAreaSceneName)
+    {
+        if (string.IsNullOrWhiteSpace(keepAreaSceneName))
+        {
+            yield break;
+        }
+
+        List<Scene> scenesToUnload = new List<Scene>();
+
+        int loadedSceneCount = SceneManager.sceneCount;
+
+        for (int i = 0; i < loadedSceneCount; i++)
+        {
+            Scene scene = SceneManager.GetSceneAt(i);
+
+            if (!scene.IsValid() || !scene.isLoaded)
+            {
+                continue;
+            }
+
+            if (scene.name == keepAreaSceneName)
+            {
+                continue;
+            }
+
+            if (!IsGameplayAreaScene(scene))
+            {
+                continue;
+            }
+
+            scenesToUnload.Add(scene);
+        }
+
+        for (int i = 0; i < scenesToUnload.Count; i++)
+        {
+            Scene scene = scenesToUnload[i];
+
+            if (!scene.IsValid() || !scene.isLoaded)
+            {
+                continue;
+            }
+
+            AsyncOperation unloadOperation = SceneManager.UnloadSceneAsync(scene);
+
+            if (unloadOperation == null)
+            {
+                continue;
+            }
+
+            if (verboseLogging)
+            {
+                Debug.Log(
+                    $"[PlayerAreaStreamingController] Owner unloading non-current area scene '{scene.name}'. Keeping '{keepAreaSceneName}'.",
+                    this);
+            }
+
+            while (!unloadOperation.isDone)
+            {
+                yield return null;
+            }
+        }
+    }
+
+    private IEnumerator UnloadOwnerSceneIfLoaded(string sceneName, string keepSceneName)
+    {
+        if (string.IsNullOrWhiteSpace(sceneName))
+        {
+            yield break;
+        }
+
+        if (!string.IsNullOrWhiteSpace(keepSceneName) && sceneName == keepSceneName)
+        {
+            yield break;
+        }
+
+        Scene scene = SceneManager.GetSceneByName(sceneName);
+
+        if (!scene.IsValid() || !scene.isLoaded)
+        {
+            yield break;
+        }
+
+        AsyncOperation unloadOperation = SceneManager.UnloadSceneAsync(scene);
+
+        if (unloadOperation == null)
+        {
+            yield break;
+        }
+
+        if (verboseLogging)
+        {
+            Debug.Log(
+                $"[PlayerAreaStreamingController] Owner unloading scene '{sceneName}'. Keeping '{keepSceneName}'.",
+                this);
+        }
+
+        while (!unloadOperation.isDone)
+        {
+            yield return null;
+        }
+    }
+
+    private bool IsGameplayAreaScene(Scene scene)
+    {
+        if (!scene.IsValid() || string.IsNullOrWhiteSpace(scene.name))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(gameplayAreaSceneNamePrefix) &&
+            scene.name.StartsWith(gameplayAreaSceneNamePrefix, System.StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (explicitGameplayAreaSceneNames != null)
+        {
+            for (int i = 0; i < explicitGameplayAreaSceneNames.Length; i++)
+            {
+                string explicitSceneName = explicitGameplayAreaSceneNames[i];
+
+                if (string.IsNullOrWhiteSpace(explicitSceneName))
+                {
+                    continue;
+                }
+
+                if (scene.name == explicitSceneName)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }

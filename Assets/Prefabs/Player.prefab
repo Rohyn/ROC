@@ -366,10 +366,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerInteractionSensor
   ShowTopMostFoldoutHeaderGroup: 1
-  detectionRadius: 5
+  detectionRadius: 3
   detectionMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 64
   refreshIntervalSeconds: 0.08
   queryTriggerInteraction: 2
   verboseLogging: 1
@@ -471,7 +471,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerAreaStreamingController
   ShowTopMostFoldoutHeaderGroup: 1
-  initialAreaSceneName: Intro
+  initialAreaSceneName: Area_Intro
+  cleanupOtherAreaScenesOnOwner: 1
+  gameplayAreaSceneNamePrefix: Area_
+  explicitGameplayAreaSceneNames: []
   unloadPreviousAreaOnOwner: 1
   verboseLogging: 1
 --- !u!114 &-1312632247654305371
