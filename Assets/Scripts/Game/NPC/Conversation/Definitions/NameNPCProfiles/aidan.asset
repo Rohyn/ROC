@@ -33,6 +33,7 @@ MonoBehaviour:
       requiredCompletedQuestIds: []
       blockedActiveQuestIds: []
       blockedCompletedQuestIds: []
+      verboseConditionLogging: 1
     effects:
       questToAccept: {fileID: 0}
       progressFlagsToGrant: []
@@ -50,6 +51,7 @@ MonoBehaviour:
       requiredCompletedQuestIds: []
       blockedActiveQuestIds: []
       blockedCompletedQuestIds: []
+      verboseConditionLogging: 1
     effects:
       questToAccept: {fileID: 0}
       progressFlagsToGrant: []
@@ -71,7 +73,8 @@ MonoBehaviour:
       - intro.find_tucker
       blockedCompletedQuestIds:
       - intro.find_tucker
+      verboseConditionLogging: 1
     effects:
-      questToAccept: {fileID: 0}
+      questToAccept: {fileID: 11400000, guid: dd6e0c0a20bbbe142a8e7c5a6a7b86f6, type: 2}
       progressFlagsToGrant: []
     followUpTopics: []

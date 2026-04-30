@@ -18,7 +18,9 @@ namespace ROC.Persistence
         public List<InventoryItemSaveData> EquippedItems = new();
         public List<string> ProgressFlags = new();
 
-        // Ready for the next milestone.
+        public List<QuestSaveData> ActiveQuests = new();
+        public List<string> CompletedQuestIds = new();
+
         public List<SkillSaveData> Skills = new();
     }
 }

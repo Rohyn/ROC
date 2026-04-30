@@ -522,6 +522,5 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerQuestLog
   ShowTopMostFoldoutHeaderGroup: 1
+  questCatalog: {fileID: 11400000, guid: 64efd128d473bae4397c37418dbb944b, type: 2}
   verboseLogging: 1
-  activeQuests: []
-  completedQuestDefinitionIds: []

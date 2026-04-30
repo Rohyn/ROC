@@ -1,12 +1,10 @@
 using System;
+using System.Collections.Generic;
+using ROC.Persistence;
 using UnityEngine;
 
 /// <summary>
 /// Runtime instance of a quest owned by one player.
-///
-/// IMPORTANT:
-/// - A player never directly "has" a QuestDefinition as active state.
-/// - They have a QuestInstance, which tracks progress and runtime state.
 /// </summary>
 [Serializable]
 public class QuestInstance
@@ -39,6 +37,16 @@ public class QuestInstance
             isComplete = false;
         }
 
+        public QuestObjectiveProgressData(
+            string objectiveId,
+            int currentCount,
+            bool isComplete)
+        {
+            this.objectiveId = objectiveId;
+            this.currentCount = Mathf.Max(0, currentCount);
+            this.isComplete = isComplete;
+        }
+
         public void SetProgress(int count, int required)
         {
             currentCount = Mathf.Max(0, count);
@@ -49,6 +57,16 @@ public class QuestInstance
         {
             currentCount += Mathf.Max(0, amount);
             isComplete = currentCount >= Mathf.Max(1, required);
+        }
+
+        public QuestObjectiveProgressSaveData CreateSaveData()
+        {
+            return new QuestObjectiveProgressSaveData
+            {
+                ObjectiveId = objectiveId,
+                CurrentCount = currentCount,
+                IsComplete = isComplete
+            };
         }
     }
 
@@ -68,16 +86,50 @@ public class QuestInstance
         instanceId = Guid.NewGuid().ToString("N");
         state = QuestInstanceState.Active;
 
-        QuestObjectiveDefinition[] objectives = definition != null ? definition.Objectives : null;
-        int count = objectives != null ? objectives.Length : 0;
+        InitializeEmptyObjectiveProgress();
+    }
 
-        objectiveProgress = new QuestObjectiveProgressData[count];
+    public QuestInstance(QuestDefinition definition, QuestSaveData saveData)
+    {
+        this.definition = definition;
 
-        for (int i = 0; i < count; i++)
+        instanceId = saveData != null && !string.IsNullOrWhiteSpace(saveData.InstanceId)
+            ? saveData.InstanceId
+            : Guid.NewGuid().ToString("N");
+
+        state = saveData != null && IsValidState(saveData.State)
+            ? (QuestInstanceState)saveData.State
+            : QuestInstanceState.Active;
+
+        RestoreObjectiveProgress(saveData);
+    }
+
+    public QuestSaveData CreateSaveData()
+    {
+        QuestSaveData saveData = new QuestSaveData
         {
-            string objectiveId = objectives[i] != null ? objectives[i].ObjectiveId : $"objective_{i}";
-            objectiveProgress[i] = new QuestObjectiveProgressData(objectiveId);
+            QuestId = definition != null ? definition.QuestId : string.Empty,
+            InstanceId = instanceId,
+            State = (int)state,
+            Objectives = new List<QuestObjectiveProgressSaveData>()
+        };
+
+        if (objectiveProgress != null)
+        {
+            for (int i = 0; i < objectiveProgress.Length; i++)
+            {
+                QuestObjectiveProgressData progress = objectiveProgress[i];
+
+                if (progress == null)
+                {
+                    continue;
+                }
+
+                saveData.Objectives.Add(progress.CreateSaveData());
+            }
         }
+
+        return saveData;
     }
 
     public bool IsAllObjectivesSatisfied()
@@ -98,11 +150,6 @@ public class QuestInstance
         return true;
     }
 
-    /// <summary>
-    /// Initializes or refreshes state-driven objectives from the player's current state.
-    /// Use this when the quest is first accepted and after events that might affect
-    /// possession/equipment style objectives.
-    /// </summary>
     public void RefreshStateDrivenObjectives(GameObject playerObject)
     {
         if (definition == null || definition.Objectives == null || objectiveProgress == null)
@@ -132,11 +179,6 @@ public class QuestInstance
         EvaluateOverallState();
     }
 
-    /// <summary>
-    /// Applies a gameplay event to this quest instance.
-    ///
-    /// Returns true if any objective progress changed.
-    /// </summary>
     public bool ApplyGameplayEvent(GameplayEventData eventData, GameObject playerObject)
     {
         if (definition == null || definition.Objectives == null || objectiveProgress == null)
@@ -146,7 +188,6 @@ public class QuestInstance
 
         bool changed = false;
 
-        // Event-driven objective advancement.
         for (int i = 0; i < definition.Objectives.Length && i < objectiveProgress.Length; i++)
         {
             QuestObjectiveDefinition objective = definition.Objectives[i];
@@ -177,10 +218,10 @@ public class QuestInstance
             changed = true;
         }
 
-        // State-driven objectives are recalculated from player state after every event.
-        // This keeps possess/equip objectives accurate if items are gained, lost, equipped, or unequipped.
         int stateDrivenBeforeHash = GetStateDrivenCompletionHash();
+
         RefreshStateDrivenObjectives(playerObject);
+
         int stateDrivenAfterHash = GetStateDrivenCompletionHash();
 
         if (stateDrivenBeforeHash != stateDrivenAfterHash)
@@ -189,6 +230,7 @@ public class QuestInstance
         }
 
         EvaluateOverallState();
+
         return changed;
     }
 
@@ -205,6 +247,73 @@ public class QuestInstance
     public void MarkAbandoned()
     {
         state = QuestInstanceState.Abandoned;
+    }
+
+    private void InitializeEmptyObjectiveProgress()
+    {
+        QuestObjectiveDefinition[] objectives = definition != null ? definition.Objectives : null;
+        int count = objectives != null ? objectives.Length : 0;
+
+        objectiveProgress = new QuestObjectiveProgressData[count];
+
+        for (int i = 0; i < count; i++)
+        {
+            string objectiveId = objectives[i] != null ? objectives[i].ObjectiveId : $"objective_{i}";
+            objectiveProgress[i] = new QuestObjectiveProgressData(objectiveId);
+        }
+    }
+
+    private void RestoreObjectiveProgress(QuestSaveData saveData)
+    {
+        QuestObjectiveDefinition[] objectives = definition != null ? definition.Objectives : null;
+        int count = objectives != null ? objectives.Length : 0;
+
+        objectiveProgress = new QuestObjectiveProgressData[count];
+
+        for (int i = 0; i < count; i++)
+        {
+            string objectiveId = objectives[i] != null ? objectives[i].ObjectiveId : $"objective_{i}";
+            QuestObjectiveProgressSaveData savedProgress = FindSavedObjectiveProgress(saveData, objectiveId);
+
+            if (savedProgress != null)
+            {
+                objectiveProgress[i] = new QuestObjectiveProgressData(
+                    objectiveId,
+                    savedProgress.CurrentCount,
+                    savedProgress.IsComplete);
+            }
+            else
+            {
+                objectiveProgress[i] = new QuestObjectiveProgressData(objectiveId);
+            }
+        }
+    }
+
+    private static QuestObjectiveProgressSaveData FindSavedObjectiveProgress(
+        QuestSaveData saveData,
+        string objectiveId)
+    {
+        if (saveData == null || saveData.Objectives == null || string.IsNullOrWhiteSpace(objectiveId))
+        {
+            return null;
+        }
+
+        for (int i = 0; i < saveData.Objectives.Count; i++)
+        {
+            QuestObjectiveProgressSaveData progress = saveData.Objectives[i];
+
+            if (progress == null)
+            {
+                continue;
+            }
+
+            if (progress.ObjectiveId == objectiveId)
+            {
+                return progress;
+            }
+        }
+
+        return null;
     }
 
     private void EvaluateOverallState()
@@ -254,5 +363,10 @@ public class QuestInstance
 
             return hash;
         }
+    }
+
+    private static bool IsValidState(int stateValue)
+    {
+        return Enum.IsDefined(typeof(QuestInstanceState), stateValue);
     }
 }

@@ -1,30 +1,25 @@
 using System;
 using System.Collections.Generic;
+using ROC.Persistence;
 using Unity.Collections;
 using Unity.Netcode;
 using UnityEngine;
 
 /// <summary>
 /// Server-authoritative quest log for one player.
-///
-/// RESPONSIBILITIES:
-/// - accept quests
-/// - track active runtime quest instances
-/// - track completed quest history by definition id
-/// - consume normalized gameplay events
-/// - auto-complete quests when appropriate
-/// - emit quest accept/complete gameplay events, including quest tags
-/// - publish an owner-only journal snapshot for UI
 /// </summary>
 [DisallowMultipleComponent]
 [RequireComponent(typeof(NetworkObject))]
 public class PlayerQuestLog : NetworkBehaviour
 {
+    [Header("Definitions")]
+    [SerializeField] private QuestCatalog questCatalog;
+
     [Header("Debug")]
     [SerializeField] private bool verboseLogging = true;
 
-    [SerializeField] private List<QuestInstance> activeQuests = new();
-    [SerializeField] private List<string> completedQuestDefinitionIds = new();
+    private readonly List<QuestInstance> activeQuests = new();
+    private readonly List<string> completedQuestDefinitionIds = new();
 
     private readonly List<QuestJournalEntryData> _journalActiveQuests = new();
     private readonly List<string> _journalCompletedQuestIds = new();
@@ -36,6 +31,14 @@ public class PlayerQuestLog : NetworkBehaviour
 
     public IReadOnlyList<QuestJournalEntryData> JournalActiveQuests => _journalActiveQuests;
     public IReadOnlyList<string> JournalCompletedQuestIds => _journalCompletedQuestIds;
+
+    private void Awake()
+    {
+        activeQuests.Clear();
+        completedQuestDefinitionIds.Clear();
+        _journalActiveQuests.Clear();
+        _journalCompletedQuestIds.Clear();
+    }
 
     public override void OnNetworkSpawn()
     {
@@ -52,6 +55,8 @@ public class PlayerQuestLog : NetworkBehaviour
             return false;
         }
 
+        string normalizedQuestId = NormalizeId(questId);
+
         for (int i = 0; i < activeQuests.Count; i++)
         {
             QuestInstance instance = activeQuests[i];
@@ -61,7 +66,7 @@ public class PlayerQuestLog : NetworkBehaviour
                 continue;
             }
 
-            if (instance.Definition.QuestId == questId)
+            if (NormalizeId(instance.Definition.QuestId) == normalizedQuestId)
             {
                 return true;
             }
@@ -77,9 +82,11 @@ public class PlayerQuestLog : NetworkBehaviour
             return false;
         }
 
+        string normalizedQuestId = NormalizeId(questId);
+
         for (int i = 0; i < completedQuestDefinitionIds.Count; i++)
         {
-            if (completedQuestDefinitionIds[i] == questId)
+            if (NormalizeId(completedQuestDefinitionIds[i]) == normalizedQuestId)
             {
                 return true;
             }
@@ -176,7 +183,7 @@ public class PlayerQuestLog : NetworkBehaviour
                 continue;
             }
 
-            if (instance.Definition.QuestId != questId)
+            if (NormalizeId(instance.Definition.QuestId) != NormalizeId(questId))
             {
                 continue;
             }
@@ -196,9 +203,6 @@ public class PlayerQuestLog : NetworkBehaviour
         return false;
     }
 
-    /// <summary>
-    /// Server-only entry point for all gameplay event ingestion.
-    /// </summary>
     public void RecordGameplayEvent(GameplayEventData eventData)
     {
         if (!IsServer)
@@ -212,9 +216,6 @@ public class PlayerQuestLog : NetworkBehaviour
         RaiseQuestLogChanged();
     }
 
-    /// <summary>
-    /// Owner/client call used by UI to ask the server for the latest journal snapshot.
-    /// </summary>
     public void RequestQuestJournalSnapshot()
     {
         if (!IsOwner)
@@ -236,6 +237,128 @@ public class PlayerQuestLog : NetworkBehaviour
     private void RequestQuestJournalSnapshotRpc()
     {
         SendQuestJournalSnapshotToOwner();
+    }
+
+    // ---------------------------------------------------------------------
+    // Persistence API
+    // ---------------------------------------------------------------------
+
+    public void ApplySaveDataServer(
+        IReadOnlyList<QuestSaveData> activeQuestSaves,
+        IReadOnlyList<string> completedQuestIds)
+    {
+        if (!IsServer)
+        {
+            Debug.LogWarning("[PlayerQuestLog] ApplySaveDataServer called on non-server instance.", this);
+            return;
+        }
+
+        activeQuests.Clear();
+        completedQuestDefinitionIds.Clear();
+
+        if (completedQuestIds != null)
+        {
+            for (int i = 0; i < completedQuestIds.Count; i++)
+            {
+                string questId = NormalizeId(completedQuestIds[i]);
+
+                if (string.IsNullOrWhiteSpace(questId))
+                {
+                    continue;
+                }
+
+                if (!completedQuestDefinitionIds.Contains(questId))
+                {
+                    completedQuestDefinitionIds.Add(questId);
+                }
+            }
+        }
+
+        if (activeQuestSaves != null)
+        {
+            for (int i = 0; i < activeQuestSaves.Count; i++)
+            {
+                QuestSaveData saveData = activeQuestSaves[i];
+
+                if (saveData == null || string.IsNullOrWhiteSpace(saveData.QuestId))
+                {
+                    continue;
+                }
+
+                if (questCatalog == null)
+                {
+                    Debug.LogWarning(
+                        $"[PlayerQuestLog] Cannot restore active quest '{saveData.QuestId}' because no QuestCatalog is assigned.",
+                        this);
+                    continue;
+                }
+
+                if (!questCatalog.TryGetDefinition(saveData.QuestId, out QuestDefinition definition) || definition == null)
+                {
+                    Debug.LogWarning(
+                        $"[PlayerQuestLog] Cannot restore active quest '{saveData.QuestId}' because it is not in the QuestCatalog.",
+                        this);
+                    continue;
+                }
+
+                if (HasCompletedQuest(definition.QuestId) && !definition.Repeatable)
+                {
+                    continue;
+                }
+
+                activeQuests.Add(new QuestInstance(definition, saveData));
+            }
+        }
+
+        if (verboseLogging)
+        {
+            Debug.Log(
+                $"[PlayerQuestLog] Loaded {activeQuests.Count} active quest(s) and {completedQuestDefinitionIds.Count} completed quest id(s).",
+                this);
+        }
+
+        RaiseQuestLogChanged();
+    }
+
+    public List<QuestSaveData> CreateActiveQuestSaveData()
+    {
+        List<QuestSaveData> result = new List<QuestSaveData>();
+
+        for (int i = 0; i < activeQuests.Count; i++)
+        {
+            QuestInstance instance = activeQuests[i];
+
+            if (instance == null || instance.Definition == null)
+            {
+                continue;
+            }
+
+            result.Add(instance.CreateSaveData());
+        }
+
+        return result;
+    }
+
+    public List<string> CreateCompletedQuestSaveData()
+    {
+        List<string> result = new List<string>();
+
+        for (int i = 0; i < completedQuestDefinitionIds.Count; i++)
+        {
+            string questId = NormalizeId(completedQuestDefinitionIds[i]);
+
+            if (string.IsNullOrWhiteSpace(questId))
+            {
+                continue;
+            }
+
+            if (!result.Contains(questId))
+            {
+                result.Add(questId);
+            }
+        }
+
+        return result;
     }
 
     private void RecordGameplayEventInternal(GameplayEventData eventData)
@@ -304,7 +427,7 @@ public class PlayerQuestLog : NetworkBehaviour
             return;
         }
 
-        string questId = instance.Definition.QuestId;
+        string questId = NormalizeId(instance.Definition.QuestId);
         string questTitle = instance.Definition.Title;
 
         instance.MarkCompleted();
@@ -343,6 +466,8 @@ public class PlayerQuestLog : NetworkBehaviour
             return null;
         }
 
+        string normalizedQuestId = NormalizeId(questId);
+
         for (int i = 0; i < activeQuests.Count; i++)
         {
             QuestInstance instance = activeQuests[i];
@@ -352,7 +477,7 @@ public class PlayerQuestLog : NetworkBehaviour
                 continue;
             }
 
-            if (instance.Definition.QuestId == questId)
+            if (NormalizeId(instance.Definition.QuestId) == normalizedQuestId)
             {
                 return instance;
             }
@@ -422,7 +547,7 @@ public class PlayerQuestLog : NetworkBehaviour
 
         for (int i = 0; i < completedQuestDefinitionIds.Count; i++)
         {
-            string questId = completedQuestDefinitionIds[i];
+            string questId = NormalizeId(completedQuestDefinitionIds[i]);
 
             if (string.IsNullOrWhiteSpace(questId))
             {
@@ -531,6 +656,13 @@ public class PlayerQuestLog : NetworkBehaviour
         }
 
         QuestLogChanged?.Invoke();
+    }
+
+    private static string NormalizeId(string value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : value.Trim();
     }
 
     private static string Truncate(string value, int maxLength)

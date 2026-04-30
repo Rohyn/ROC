@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -16,6 +17,9 @@ public class NPCConversationComponent : MonoBehaviour
 {
     [Header("Profile")]
     [SerializeField] private NPCConversationProfile conversationProfile;
+
+    [Header("Debug")]
+    [SerializeField] private bool verboseLogging = true;
 
     private NPCIdentityComponent identityComponent;
 
@@ -68,6 +72,13 @@ public class NPCConversationComponent : MonoBehaviour
                 nextTopics);
         }
 
+        if (verboseLogging)
+        {
+            Debug.LogWarning(
+                $"[NPCConversationComponent] No valid entry resolved for topic '{GetTopicDebugName(topic)}' on NPC '{name}'.",
+                this);
+        }
+
         string fallback = conversationProfile != null
             ? conversationProfile.FallbackResponse
             : "I do not have much to say about that.";
@@ -91,6 +102,13 @@ public class NPCConversationComponent : MonoBehaviour
 
         if (!TryFindTopicById(topicId, out ConversationTopicDefinition topic))
         {
+            if (verboseLogging)
+            {
+                Debug.LogWarning(
+                    $"[NPCConversationComponent] Could not find topic id '{topicId}' in profile for NPC '{name}'.",
+                    this);
+            }
+
             return new NPCConversationResponseData(
                 DisplayName,
                 conversationProfile != null ? conversationProfile.FallbackResponse : "I do not have much to say about that.",
@@ -106,7 +124,12 @@ public class NPCConversationComponent : MonoBehaviour
     {
         if (candidateTopics == null || candidateTopics.Length == 0)
         {
-            return new ConversationTopicDefinition[0];
+            if (verboseLogging)
+            {
+                Debug.Log($"[NPCConversationComponent] No candidate topics for NPC '{name}'.", this);
+            }
+
+            return Array.Empty<ConversationTopicDefinition>();
         }
 
         List<ConversationTopicDefinition> available = new List<ConversationTopicDefinition>();
@@ -117,11 +140,23 @@ public class NPCConversationComponent : MonoBehaviour
 
             if (topic == null)
             {
+                if (verboseLogging)
+                {
+                    Debug.LogWarning($"[NPCConversationComponent] Null topic in candidate list on NPC '{name}'.", this);
+                }
+
                 continue;
             }
 
             if (!topic.IsAvailableFor(interactorObject))
             {
+                if (verboseLogging)
+                {
+                    Debug.Log(
+                        $"[NPCConversationComponent] Topic '{GetTopicDebugName(topic)}' failed topic-level availability on NPC '{name}'.",
+                        this);
+                }
+
                 continue;
             }
 
@@ -134,6 +169,14 @@ public class NPCConversationComponent : MonoBehaviour
         }
 
         available.Sort((a, b) => a.SortOrder.CompareTo(b.SortOrder));
+
+        if (verboseLogging)
+        {
+            Debug.Log(
+                $"[NPCConversationComponent] NPC '{name}' resolved {available.Count} available topic(s).",
+                this);
+        }
+
         return available.ToArray();
     }
 
@@ -159,7 +202,7 @@ public class NPCConversationComponent : MonoBehaviour
                     continue;
                 }
 
-                if (topic.TopicId == topicId)
+                if (TopicIdEquals(topic.TopicId, topicId))
                 {
                     foundTopic = topic;
                     return true;
@@ -180,7 +223,7 @@ public class NPCConversationComponent : MonoBehaviour
 
                 if (entry.topic != null && seen.Add(entry.topic))
                 {
-                    if (entry.topic.TopicId == topicId)
+                    if (TopicIdEquals(entry.topic.TopicId, topicId))
                     {
                         foundTopic = entry.topic;
                         return true;
@@ -201,7 +244,7 @@ public class NPCConversationComponent : MonoBehaviour
                         continue;
                     }
 
-                    if (followUp.TopicId == topicId)
+                    if (TopicIdEquals(followUp.TopicId, topicId))
                     {
                         foundTopic = followUp;
                         return true;
@@ -215,26 +258,85 @@ public class NPCConversationComponent : MonoBehaviour
 
     private bool HasAvailableEntryForTopic(GameObject interactorObject, ConversationTopicDefinition topic)
     {
-        if (conversationProfile == null || conversationProfile.Entries == null)
+        if (conversationProfile == null)
         {
-            return true;
+            if (verboseLogging)
+            {
+                Debug.LogWarning(
+                    $"[NPCConversationComponent] NPC '{name}' has no conversation profile.",
+                    this);
+            }
+
+            return false;
         }
+
+        if (conversationProfile.Entries == null || conversationProfile.Entries.Length == 0)
+        {
+            if (verboseLogging)
+            {
+                Debug.LogWarning(
+                    $"[NPCConversationComponent] NPC '{name}' has no conversation entries. Topic '{GetTopicDebugName(topic)}' will not be shown.",
+                    this);
+            }
+
+            return false;
+        }
+
+        bool sawMatchingTopic = false;
 
         for (int i = 0; i < conversationProfile.Entries.Length; i++)
         {
             ConversationEntryDefinition entry = conversationProfile.Entries[i];
 
-            if (entry == null || entry.topic != topic)
+            if (entry == null)
             {
                 continue;
             }
+
+            if (!TopicsMatch(entry.topic, topic))
+            {
+                continue;
+            }
+
+            sawMatchingTopic = true;
 
             if (entry.conditions != null && !entry.conditions.IsSatisfiedBy(interactorObject))
             {
+                if (verboseLogging)
+                {
+                    Debug.Log(
+                        $"[NPCConversationComponent] Topic '{GetTopicDebugName(topic)}' has matching entry '{entry.entryId}', but entry conditions failed.",
+                        this);
+                }
+
                 continue;
             }
 
+            if (verboseLogging)
+            {
+                Debug.Log(
+                    $"[NPCConversationComponent] Topic '{GetTopicDebugName(topic)}' has available entry '{entry.entryId}'.",
+                    this);
+            }
+
             return true;
+        }
+
+        if (verboseLogging)
+        {
+            if (!sawMatchingTopic)
+            {
+                Debug.LogWarning(
+                    $"[NPCConversationComponent] Topic '{GetTopicDebugName(topic)}' is present, but no matching entry was found in NPC '{name}' profile. " +
+                    "Check that the entry Topic field points to the same topic asset or has the same TopicId.",
+                    this);
+            }
+            else
+            {
+                Debug.Log(
+                    $"[NPCConversationComponent] Topic '{GetTopicDebugName(topic)}' had matching entries, but none passed conditions.",
+                    this);
+            }
         }
 
         return false;
@@ -261,13 +363,20 @@ public class NPCConversationComponent : MonoBehaviour
                 continue;
             }
 
-            if (candidate.topic != topic)
+            if (!TopicsMatch(candidate.topic, topic))
             {
                 continue;
             }
 
             if (candidate.conditions != null && !candidate.conditions.IsSatisfiedBy(interactorObject))
             {
+                if (verboseLogging)
+                {
+                    Debug.Log(
+                        $"[NPCConversationComponent] Candidate entry '{candidate.entryId}' for topic '{GetTopicDebugName(topic)}' failed conditions.",
+                        this);
+                }
+
                 continue;
             }
 
@@ -275,6 +384,22 @@ public class NPCConversationComponent : MonoBehaviour
             {
                 best = candidate;
                 bestPriority = candidate.priority;
+            }
+        }
+
+        if (verboseLogging)
+        {
+            if (best != null)
+            {
+                Debug.Log(
+                    $"[NPCConversationComponent] Best entry for topic '{GetTopicDebugName(topic)}' is '{best.entryId}' with priority {best.priority}.",
+                    this);
+            }
+            else
+            {
+                Debug.LogWarning(
+                    $"[NPCConversationComponent] No best entry found for topic '{GetTopicDebugName(topic)}'.",
+                    this);
             }
         }
 
@@ -293,6 +418,56 @@ public class NPCConversationComponent : MonoBehaviour
             return;
         }
 
+        if (verboseLogging)
+        {
+            Debug.Log(
+                $"[NPCConversationComponent] Applying effects for entry '{entry.entryId}' on NPC '{name}'.",
+                this);
+        }
+
         entry.effects.Apply(interactorObject);
+    }
+
+    private static bool TopicsMatch(ConversationTopicDefinition a, ConversationTopicDefinition b)
+    {
+        if (a == null || b == null)
+        {
+            return false;
+        }
+
+        if (ReferenceEquals(a, b))
+        {
+            return true;
+        }
+
+        return TopicIdEquals(a.TopicId, b.TopicId);
+    }
+
+    private static bool TopicIdEquals(string a, string b)
+    {
+        return string.Equals(
+            NormalizeTopicId(a),
+            NormalizeTopicId(b),
+            StringComparison.Ordinal);
+    }
+
+    private static string NormalizeTopicId(string value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : value.Trim();
+    }
+
+    private static string GetTopicDebugName(ConversationTopicDefinition topic)
+    {
+        if (topic == null)
+        {
+            return "<null>";
+        }
+
+        string topicId = string.IsNullOrWhiteSpace(topic.TopicId) ? "<empty-id>" : topic.TopicId;
+        string displayName = string.IsNullOrWhiteSpace(topic.DisplayName) ? "<empty-display>" : topic.DisplayName;
+
+        return $"{displayName} ({topicId})";
     }
 }

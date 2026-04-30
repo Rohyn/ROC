@@ -35,6 +35,7 @@ namespace ROC.Persistence
         private PlayerInventory _inventory;
         private global::PlayerProgressState _progressState;
         private global::PlayerAreaStreamingController _areaStreamingController;
+        private global::PlayerQuestLog _questLog;
 
         private string _activeAccountId;
         private string _activeCharacterId;
@@ -92,6 +93,7 @@ namespace ROC.Persistence
             _inventory = GetComponent<PlayerInventory>();
             _progressState = GetComponent<global::PlayerProgressState>();
             _areaStreamingController = GetComponent<global::PlayerAreaStreamingController>();
+            _questLog = GetComponent<global::PlayerQuestLog>();
         }
 
         public override void OnNetworkSpawn()
@@ -276,6 +278,11 @@ namespace ROC.Persistence
             {
                 _progressState.ReplaceFlagsFromSaveServer(character.ProgressFlags);
             }
+
+            if (_questLog != null)
+            {
+                _questLog.ApplySaveDataServer(character.ActiveQuests, character.CompletedQuestIds);
+            }
         }
 
         private void ApplyTransform(CharacterSaveData character)
@@ -409,6 +416,12 @@ namespace ROC.Persistence
                 character.ProgressFlags = _progressState.CreateFlagSaveData();
             }
 
+            if (_questLog != null)
+            {
+                character.ActiveQuests = _questLog.CreateActiveQuestSaveData();
+                character.CompletedQuestIds = _questLog.CreateCompletedQuestSaveData();
+            }
+
             return character;
         }
 
@@ -449,6 +462,11 @@ namespace ROC.Persistence
             {
                 _progressState.FlagsChanged += QueueSave;
             }
+
+            if (_questLog != null)
+            {
+                _questLog.QuestLogChanged += QueueSave;
+            }
         }
 
         private void UnsubscribeFromStateEvents()
@@ -466,6 +484,11 @@ namespace ROC.Persistence
             if (_progressState != null)
             {
                 _progressState.FlagsChanged -= QueueSave;
+            }
+
+            if (_questLog != null)
+            {
+                _questLog.QuestLogChanged -= QueueSave;
             }
         }
 
