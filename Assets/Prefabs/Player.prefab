@@ -61,6 +61,8 @@ GameObject:
   - component: {fileID: -1312632247654305371}
   - component: {fileID: -5548363901350353299}
   - component: {fileID: -5530406983675076714}
+  - component: {fileID: -1175532219645228112}
+  - component: {fileID: -7459857720779639156}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -526,4 +528,45 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PlayerQuestLog
   ShowTopMostFoldoutHeaderGroup: 1
   questCatalog: {fileID: 11400000, guid: 64efd128d473bae4397c37418dbb944b, type: 2}
+  verboseLogging: 1
+--- !u!114 &-1175532219645228112
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4a7e6a4407728d34fbd78ad935f64941, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerPromptController
+  ShowTopMostFoldoutHeaderGroup: 1
+  promptCatalog: {fileID: 11400000, guid: c3ed13fa43bc90745b09c07609e6d301, type: 2}
+  toastView: {fileID: 0}
+  secondsBetweenPrompts: 0.35
+  allowHighPriorityInterrupts: 1
+  interruptPriorityDelta: 500
+  respectDefinitionConditionsOnServerPush: 0
+  verboseLogging: 0
+--- !u!114 &-7459857720779639156
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: eb1d28f2c0ac39247a339d5b02e1758f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::EquipmentProgressFlagRules
+  ShowTopMostFoldoutHeaderGroup: 1
+  rules:
+  - ruleName: Intro Pants Equipped
+    requiredEquippedItemIds:
+    - intro_pants
+    requireAnyEquippedItem: 0
+    flagsToGrant:
+    - intro.dressed
   verboseLogging: 1
