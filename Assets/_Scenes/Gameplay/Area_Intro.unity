@@ -939,6 +939,9 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 1703843792552052, guid: 60985fdc46b91334597bfd17e5341791, type: 3}
       insertIndex: -1
       addedObject: {fileID: 842296672}
+    - targetCorrespondingSourceObject: {fileID: 1703843792552052, guid: 60985fdc46b91334597bfd17e5341791, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 842296673}
   m_SourcePrefab: {fileID: 100100000, guid: 60985fdc46b91334597bfd17e5341791, type: 3}
 --- !u!4 &842296665 stripped
 Transform:
@@ -1003,7 +1006,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f4c78b1089c1ec249b78b500308b544b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ToggleStatusAction
-  executionOrder: 0
+  executionOrder: 3
   statusToToggle: {fileID: 11400000, guid: 260d98a8d0bb4eb4ab78097862e832b2, type: 2}
   stopFurtherActionsWhenRemoved: 1
   stopFurtherActionsWhenApplied: 0
@@ -1067,6 +1070,23 @@ MonoBehaviour:
   - intro.stood_up
   onlyIfMissingAnyBagItems: []
   stopFurtherActionsAfterGrant: 0
+  verboseLogging: 1
+--- !u!114 &842296673
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 842296666}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2683f9eb10ff6bd40a32f6cd2dfe6c17, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SendPromptAction
+  executionOrder: 2
+  promptDefinition: {fileID: 11400000, guid: 42f02e0808c87624abb1cd568d5b13d1, type: 2}
+  promptId: intro.aidan.get_clothes
+  stopFurtherActionsAfterSend: 0
   verboseLogging: 1
 --- !u!1001 &853822735
 PrefabInstance:
@@ -1396,6 +1416,7 @@ GameObject:
   - component: {fileID: 1145310280}
   - component: {fileID: 1145310283}
   - component: {fileID: 1145310285}
+  - component: {fileID: 1145310286}
   m_Layer: 0
   m_Name: DoorRoot
   m_TagString: Untagged
@@ -1527,7 +1548,7 @@ MonoBehaviour:
   - intro.tried_door
   onlyIfMissingAnyBagItems:
   - {fileID: 11400000, guid: 23180f62ae60e0f46aff6a9881feb9a1, type: 2}
-  stopFurtherActionsAfterGrant: 0
+  stopFurtherActionsAfterGrant: 1
   verboseLogging: 1
 --- !u!114 &1145310284
 MonoBehaviour:
@@ -1565,7 +1586,26 @@ MonoBehaviour:
     sceneName: Area_DKeepCenter
     spawnPointId: intro_arrival
   requiredOpenRotationState: {fileID: 1145310281}
-  stopFurtherActionsOnSuccess: 1
+  stopFurtherActionsOnSuccess: 0
+  verboseLogging: 1
+--- !u!114 &1145310286
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1145310277}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 11c1263f8a4b4cc4b999e0927765516a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::RevokeProgressFlagsByPrefixAction
+  executionOrder: 3
+  prefix: intro.
+  requiredProgressFlags:
+  - intro.key_taken
+  blockedProgressFlags: []
+  stopFurtherActionsAfterRevoke: 0
   verboseLogging: 1
 --- !u!1 &1154487638
 GameObject:
@@ -2626,6 +2666,12 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 1702917804995862, guid: 5989ab8b158243445aef3657bfd64840, type: 3}
       insertIndex: -1
       addedObject: {fileID: 1828458439}
+    - targetCorrespondingSourceObject: {fileID: 1702917804995862, guid: 5989ab8b158243445aef3657bfd64840, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1828458443}
+    - targetCorrespondingSourceObject: {fileID: 1702917804995862, guid: 5989ab8b158243445aef3657bfd64840, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1828458442}
   m_SourcePrefab: {fileID: 100100000, guid: 5989ab8b158243445aef3657bfd64840, type: 3}
 --- !u!4 &1828458436 stripped
 Transform:
@@ -2674,7 +2720,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 97a2405cf435a5c4eae75bbff243a4d0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GiveItemAction
-  executionOrder: 1
+  executionOrder: 4
   itemToGive: {fileID: 11400000, guid: 7d7f21a6f7c0e1542b877579a8d95b57, type: 2}
   quantity: 1
   requireInventorySpace: 1
@@ -2690,7 +2736,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 97a2405cf435a5c4eae75bbff243a4d0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GiveItemAction
-  executionOrder: 0
+  executionOrder: 3
   itemToGive: {fileID: 11400000, guid: 8935dcf8f8b9a514498ee5cb1d531ecb, type: 2}
   quantity: 1
   requireInventorySpace: 1
@@ -2718,6 +2764,42 @@ MonoBehaviour:
   consumeOnSuccessfulInteraction: 0
   consumptionMode: 0
   hidePresentationWhenConsumed: 1
+  verboseLogging: 1
+--- !u!114 &1828458442
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1828458437}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2683f9eb10ff6bd40a32f6cd2dfe6c17, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SendPromptAction
+  executionOrder: 2
+  promptDefinition: {fileID: 11400000, guid: 76195bbac2afc164b9928740d8482137, type: 2}
+  promptId: intro.aidan.equip
+  stopFurtherActionsAfterSend: 0
+  verboseLogging: 1
+--- !u!114 &1828458443
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1828458437}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f81c6deb80e43674aa744568fa994e9b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::GrantProgressFlagAction
+  executionOrder: 1
+  flagsToGrant:
+  - intro.got_clothes
+  onlyIfMissingAnyBagItems:
+  - {fileID: 11400000, guid: 7d7f21a6f7c0e1542b877579a8d95b57, type: 2}
+  stopFurtherActionsAfterGrant: 0
   verboseLogging: 1
 --- !u!1001 &1841358122
 PrefabInstance:

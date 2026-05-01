@@ -23,13 +23,15 @@ MonoBehaviour:
   repeatMode: 1
   conditions:
     suppressWhileConversationOpen: 1
-    requiredLoadedSceneNames:
+    requiredCurrentAreaSceneNames:
     - Area_Intro
+    blockedCurrentAreaSceneNames: []
+    requiredLoadedSceneNames: []
     blockedLoadedSceneNames: []
     requiredProgressFlags:
     - intro.stood_up
     blockedProgressFlags:
-    - intro.dressed
+    - intro.get_clothes
     requiredBagItemIds: []
     requiredEquippedItemIds: []
     requiredActiveQuestIds: []

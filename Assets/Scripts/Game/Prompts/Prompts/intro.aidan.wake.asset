@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f0fcf9b4c12d17649b456a7540ab8195, type: 3}
   m_Name: intro.aidan.wake
   m_EditorClassIdentifier: Assembly-CSharp::PromptDefinition
-  promptId: prompt.aidan.wake
+  promptId: intro.aidan.wake
   channel: 1
   speakerName: Aidan
   messageText: "Oh, you\u2019re awake. Go on then, hop out of bed. Press E to interact
@@ -23,8 +23,10 @@ MonoBehaviour:
   repeatMode: 1
   conditions:
     suppressWhileConversationOpen: 1
-    requiredLoadedSceneNames:
+    requiredCurrentAreaSceneNames:
     - Area_Intro
+    blockedCurrentAreaSceneNames: []
+    requiredLoadedSceneNames: []
     blockedLoadedSceneNames: []
     requiredProgressFlags: []
     blockedProgressFlags:

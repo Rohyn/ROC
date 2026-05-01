@@ -59,8 +59,9 @@ MonoBehaviour:
   - entryId: 2
     topic: {fileID: 11400000, guid: a76391628af58314cae3339fe1f8c33b, type: 2}
     responseText: "If you\u2019re steady enough to stand, you\u2019re steady enough
-      to be useful. Head out to the training yard and find Tucker. He handles the
-      first round of basic training."
+      to be useful. Go find Tucker. He handles the first round of basic training.
+      Just take the door and head downstairs and out of the tower. You can't miss
+      him."
     priority: 0
     conditions:
       requiredProgressFlags: []

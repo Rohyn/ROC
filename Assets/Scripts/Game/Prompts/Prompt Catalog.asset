@@ -14,7 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PromptCatalog
   prompts:
   - {fileID: 11400000, guid: 5c3cd4305b70549478ade9af39d24e93, type: 2}
-  - {fileID: 11400000, guid: 018f86b35dd62664fb6569b810abee87, type: 2}
   - {fileID: 11400000, guid: 42f02e0808c87624abb1cd568d5b13d1, type: 2}
   - {fileID: 11400000, guid: 23862d7894b671f4a828d716f33e53b2, type: 2}
   - {fileID: 11400000, guid: 961a6d7582a3552458ac6eda0db77974, type: 2}
+  - {fileID: 11400000, guid: 76195bbac2afc164b9928740d8482137, type: 2}

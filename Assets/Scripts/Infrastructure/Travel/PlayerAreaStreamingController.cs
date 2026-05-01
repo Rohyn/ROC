@@ -60,6 +60,7 @@ public class PlayerAreaStreamingController : NetworkBehaviour
     public bool HasInitializedAreaState => _hasInitializedAreaState;
     public bool IsServerTransferInProgress => _serverTransferInProgress;
     public bool IsAreaTransferInProgress => _serverTransferInProgress || _ownerTransferInProgress;
+    public event System.Action<string, string> ServerAreaTransferCompleted;
 
     public override void OnNetworkSpawn()
     {
@@ -194,8 +195,12 @@ public class PlayerAreaStreamingController : NetworkBehaviour
 
     public void CompleteServerTransfer(string newAreaSceneName)
     {
+        string previousAreaSceneName = _currentAreaSceneName;
+
         _currentAreaSceneName = newAreaSceneName;
         ClearPendingTransferServer();
+
+        ServerAreaTransferCompleted?.Invoke(previousAreaSceneName, newAreaSceneName);
     }
 
     public void BeginOwnerSceneLoad(TravelDestination destination, string previousAreaSceneName)

@@ -63,6 +63,7 @@ GameObject:
   - component: {fileID: -5530406983675076714}
   - component: {fileID: -1175532219645228112}
   - component: {fileID: -7459857720779639156}
+  - component: {fileID: 4652373160054039584}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -548,7 +549,7 @@ MonoBehaviour:
   allowHighPriorityInterrupts: 1
   interruptPriorityDelta: 500
   respectDefinitionConditionsOnServerPush: 0
-  verboseLogging: 0
+  verboseLogging: 1
 --- !u!114 &-7459857720779639156
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -569,4 +570,20 @@ MonoBehaviour:
     requireAnyEquippedItem: 0
     flagsToGrant:
     - intro.dressed
+  verboseLogging: 1
+--- !u!114 &4652373160054039584
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9016841355397855405}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d558df651c428b148a3d13ae4ed68ec6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerPromptReadinessGate
+  ShowTopMostFoldoutHeaderGroup: 1
+  minimumStartupDelaySeconds: 1.25
+  requiredQuietSeconds: 0.25
   verboseLogging: 1
