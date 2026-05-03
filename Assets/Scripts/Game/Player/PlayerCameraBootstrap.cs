@@ -1,50 +1,72 @@
-using UnityEngine;
 using Unity.Netcode;
+using UnityEngine;
 
 /// <summary>
-/// Creates or reuses a local camera for the owning client and attaches it to
-/// the player prefab using a simple third-person camera rig.
-///
+/// Creates or reuses a local camera for the owning client and attaches a
+/// collision-safe third-person camera rig to it.
+/// 
 /// IMPORTANT:
 /// - Cameras are local-only presentation objects.
-/// - They should NOT be networked.
-/// - Only the owning client should create/attach a camera to this player object.
-///
-/// DESIGN INTENT:
-/// - The player prefab provides a CameraPivot transform in the hierarchy.
-/// - This script positions the camera relative to that pivot.
-/// - The pivot itself is responsible for pitch rotation via a separate look controller.
-/// - This script only handles camera placement, FOV, and ownership/cleanup.
+/// - Cameras should not be networked.
+/// - Only the owning client should create/attach/configure a camera.
+/// - PlayerLookController still owns yaw/pitch and cursor state.
+/// - PlayerCameraSafetyRig owns camera placement/collision.
 /// </summary>
 public class PlayerCameraBootstrap : NetworkBehaviour
 {
     [Header("Camera Pivot")]
-    [Tooltip("Transform on the player prefab that acts as the camera pivot point. Usually near the upper chest / base of neck.")]
+    [Tooltip("Transform on the player prefab that acts as the camera pivot point. Usually near upper chest / base of neck.")]
     [SerializeField] private Transform cameraPivot;
 
     [Header("Camera Placement")]
-    [Tooltip("How far behind the pivot the camera should sit.")]
+    [Tooltip("How far behind the pivot the camera should sit when unobstructed.")]
     [SerializeField] private float cameraDistance = 4.5f;
 
-    [Tooltip("How far above the pivot the camera should sit.")]
+    [Tooltip("How far above the pivot the camera should sit when unobstructed.")]
     [SerializeField] private float verticalOffset = 0.5f;
 
-    [Tooltip("Optional left/right offset. Leave at 0 for a centered MMO-style camera.")]
+    [Tooltip("Optional left/right offset. Leave at 0 for centered MMO-style camera.")]
     [SerializeField] private float sideOffset = 0f;
 
     [Tooltip("The camera's vertical field of view in degrees.")]
     [SerializeField] private float cameraFieldOfView = 65f;
 
+    [Header("Camera Collision")]
+    [Tooltip("Layers that should block the camera. Use world/architecture/props. Exclude Player, UI, and trigger-only interaction layers.")]
+    [SerializeField] private LayerMask obstructionMask = ~0;
+
+    [Tooltip("Radius used for camera sphere-cast collision.")]
+    [SerializeField] private float collisionRadius = 0.25f;
+
+    [Tooltip("Small distance to keep the camera away from walls after collision.")]
+    [SerializeField] private float surfacePadding = 0.08f;
+
+    [Tooltip("Closest allowed distance from pivot/cast origin to camera.")]
+    [SerializeField] private float minimumCameraDistance = 0.45f;
+
+    [Tooltip("How quickly the camera moves inward when blocked.")]
+    [SerializeField] private float blockedSmoothTime = 0.035f;
+
+    [Tooltip("How quickly the camera returns outward when clear.")]
+    [SerializeField] private float restoreSmoothTime = 0.12f;
+
+    [Tooltip("Near clip plane for the local camera. Lower helps tight interiors.")]
+    [SerializeField] private float nearClipPlane = 0.03f;
+
     [Header("Camera Creation")]
     [Tooltip("If no Main Camera exists, a new camera will be created automatically.")]
     [SerializeField] private bool createCameraIfMissing = true;
 
+    [Header("Debug")]
+    [SerializeField] private bool verboseLogging = false;
+
     private Camera _attachedCamera;
+    private PlayerCameraSafetyRig _safetyRig;
     private bool _createdCameraAtRuntime;
+    private bool _addedSafetyRigAtRuntime;
 
     public override void OnNetworkSpawn()
     {
-        // Only the owning client should attach a local camera.
         if (!IsOwner)
         {
             return;
@@ -55,7 +77,6 @@ public class PlayerCameraBootstrap : NetworkBehaviour
 
     public override void OnNetworkDespawn()
     {
-        // Only clean up a camera on the owning client.
         if (!IsOwner)
         {
             return;
@@ -64,24 +85,11 @@ public class PlayerCameraBootstrap : NetworkBehaviour
         DetachOrDestroyLocalCamera();
     }
 
-    /// <summary>
-    /// Attaches a camera to the player.
-    ///
-    /// Preferred behavior:
-    /// 1. Reuse an existing Main Camera if one already exists.
-    /// 2. Otherwise create a new local camera.
-    /// 3. Parent the camera to the pivot.
-    /// 4. Apply a local offset behind and above the pivot.
-    ///
-    /// IMPORTANT:
-    /// This script does NOT apply pitch.
-    /// Pitch should be controlled by a separate look controller that rotates the pivot.
-    /// </summary>
     private void AttachLocalCamera()
     {
         if (cameraPivot == null)
         {
-            Debug.LogError("[PlayerCameraBootstrap] No cameraPivot assigned on the player prefab.");
+            Debug.LogError("[PlayerCameraBootstrap] No cameraPivot assigned on the player prefab.", this);
             return;
         }
 
@@ -91,52 +99,75 @@ public class PlayerCameraBootstrap : NetworkBehaviour
         {
             if (!createCameraIfMissing)
             {
-                Debug.LogWarning("[PlayerCameraBootstrap] No Main Camera found and camera creation is disabled.");
+                Debug.LogWarning("[PlayerCameraBootstrap] No Main Camera found and camera creation is disabled.", this);
                 return;
             }
 
             GameObject cameraObject = new GameObject("Local Player Camera");
             cameraToUse = cameraObject.AddComponent<Camera>();
 
-            // Every scene should only have one active AudioListener.
-            cameraObject.AddComponent<AudioListener>();
+            if (FindFirstObjectByType<AudioListener>() == null)
+            {
+                cameraObject.AddComponent<AudioListener>();
+            }
 
             _createdCameraAtRuntime = true;
         }
 
         _attachedCamera = cameraToUse;
-
-        // Ensure other systems can find this camera via Camera.main.
         _attachedCamera.gameObject.tag = "MainCamera";
+        _attachedCamera.fieldOfView = Mathf.Clamp(cameraFieldOfView, 30f, 100f);
+        _attachedCamera.nearClipPlane = Mathf.Max(0.01f, nearClipPlane);
 
-        // Apply the desired field of view.
-        _attachedCamera.fieldOfView = cameraFieldOfView;
+        EnsureAudioListener(_attachedCamera);
 
         Transform cameraTransform = _attachedCamera.transform;
-
-        // Parent to the pivot.
-        // Using false means we want to work in local space relative to the pivot.
         cameraTransform.SetParent(cameraPivot, false);
-
-        // Place the camera behind and slightly above the pivot.
-        // The pivot itself will handle pitch/yaw behavior elsewhere.
         cameraTransform.localPosition = new Vector3(sideOffset, verticalOffset, -cameraDistance);
-
-        // Keep the camera's local rotation neutral.
-        // The pivot's rotation should determine the final viewing angle.
         cameraTransform.localRotation = Quaternion.identity;
 
-        Debug.Log("[PlayerCameraBootstrap] Attached local camera to owning player.");
+        _safetyRig = _attachedCamera.GetComponent<PlayerCameraSafetyRig>();
+
+        if (_safetyRig == null)
+        {
+            _safetyRig = _attachedCamera.gameObject.AddComponent<PlayerCameraSafetyRig>();
+            _addedSafetyRigAtRuntime = true;
+        }
+
+        _safetyRig.Configure(
+            cameraPivot,
+            transform,
+            _attachedCamera,
+            new Vector3(sideOffset, verticalOffset, -cameraDistance),
+            obstructionMask,
+            collisionRadius,
+            surfacePadding,
+            minimumCameraDistance,
+            blockedSmoothTime,
+            restoreSmoothTime,
+            nearClipPlane);
+
+        if (verboseLogging)
+        {
+            Debug.Log("[PlayerCameraBootstrap] Attached collision-safe local camera to owning player.", this);
+        }
     }
 
-    /// <summary>
-    /// Cleans up camera ownership when the player despawns.
-    ///
-    /// If we created the camera ourselves, we destroy it.
-    /// If we reused an existing scene camera, we simply detach it.
-    /// </summary>
     private void DetachOrDestroyLocalCamera()
     {
+        if (_safetyRig != null)
+        {
+            _safetyRig.Clear();
+
+            if (_addedSafetyRigAtRuntime)
+            {
+                Destroy(_safetyRig);
+            }
+        }
+
+        _safetyRig = null;
+        _addedSafetyRigAtRuntime = false;
+
         if (_attachedCamera == null)
         {
             return;
@@ -154,4 +185,38 @@ public class PlayerCameraBootstrap : NetworkBehaviour
         _attachedCamera = null;
         _createdCameraAtRuntime = false;
     }
+
+    private static void EnsureAudioListener(Camera cameraToUse)
+    {
+        if (cameraToUse == null)
+        {
+            return;
+        }
+
+        if (cameraToUse.GetComponent<AudioListener>() != null)
+        {
+            return;
+        }
+
+        if (FindFirstObjectByType<AudioListener>() != null)
+        {
+            return;
+        }
+
+        cameraToUse.gameObject.AddComponent<AudioListener>();
+    }
+
+#if UNITY_EDITOR
+    private void OnValidate()
+    {
+        cameraDistance = Mathf.Max(0.25f, cameraDistance);
+        cameraFieldOfView = Mathf.Clamp(cameraFieldOfView, 30f, 100f);
+        collisionRadius = Mathf.Max(0.01f, collisionRadius);
+        surfacePadding = Mathf.Max(0f, surfacePadding);
+        minimumCameraDistance = Mathf.Max(0.05f, minimumCameraDistance);
+        blockedSmoothTime = Mathf.Max(0.001f, blockedSmoothTime);
+        restoreSmoothTime = Mathf.Max(0.001f, restoreSmoothTime);
+        nearClipPlane = Mathf.Max(0.01f, nearClipPlane);
+    }
+#endif
 }

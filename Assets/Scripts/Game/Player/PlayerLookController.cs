@@ -1,63 +1,19 @@
 using System;
+using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using Unity.Netcode;
 
 /// <summary>
-/// First-pass third-person direct mouselook controller.
-///
-/// DESIGN GOAL:
-/// - Default gameplay uses direct mouselook (ESO-like feel).
-/// - The player root rotates on mouse X (yaw).
-/// - The camera pivot rotates on mouse Y (pitch).
-/// - The cursor is normally locked during gameplay.
-/// - Pressing '.' toggles a temporary free-cursor mode.
-/// - Pressing Tab toggles a menu cursor mode.
-/// - Movement input relocks the cursor if the player was only in temporary free-cursor mode.
-///
-/// IMPORTANT:
-/// This script only runs for the owning client.
-/// Remote players should not process local mouse input.
+/// First-pass third-person direct mouselook controller with settings/keybind support.
 /// </summary>
+[DisallowMultipleComponent]
 public class PlayerLookController : NetworkBehaviour
 {
-    /// <summary>
-    /// Distinguishes between the different cursor / look states.
-    /// </summary>
     public enum CursorModeState
     {
-        /// <summary>
-        /// Normal gameplay:
-        /// - cursor locked
-        /// - mouse moves camera
-        /// </summary>
         GameplayLocked = 0,
-
-        /// <summary>
-        /// Temporary free cursor:
-        /// - cursor unlocked
-        /// - mouse does NOT move camera
-        /// - intended for quick UI clicks
-        /// - movement input relocks back to gameplay
-        /// </summary>
         TemporaryFreeCursor = 1,
-
-        /// <summary>
-        /// Menu mode:
-        /// - cursor unlocked
-        /// - mouse does NOT move camera
-        /// - intended for inventory / map / journal / menu tabs later
-        /// - does NOT auto-close on movement in this first version
-        /// </summary>
         MenuCursor = 2,
-
-        /// <summary>
-        /// Conversation mode:
-        /// - cursor unlocked
-        /// - mouse does NOT move camera
-        /// - menu should remain closed
-        /// - used while speaking with an NPC
-        /// </summary>
         ConversationCursor = 3
     }
 
@@ -66,11 +22,11 @@ public class PlayerLookController : NetworkBehaviour
     [SerializeField] private Transform cameraPivot;
 
     [Header("Look Tuning")]
-    [Tooltip("Horizontal mouse sensitivity multiplier.")]
-    [SerializeField] private float yawSensitivity = 0.12f;
+    [Tooltip("Base horizontal mouse sensitivity before account sensitivity multiplier.")]
+    [SerializeField] private float baseYawSensitivity = 0.12f;
 
-    [Tooltip("Vertical mouse sensitivity multiplier.")]
-    [SerializeField] private float pitchSensitivity = 0.10f;
+    [Tooltip("Base vertical mouse sensitivity before account sensitivity multiplier.")]
+    [SerializeField] private float basePitchSensitivity = 0.10f;
 
     [Tooltip("Minimum vertical pitch angle in degrees.")]
     [SerializeField] private float minPitch = -35f;
@@ -78,35 +34,21 @@ public class PlayerLookController : NetworkBehaviour
     [Tooltip("Maximum vertical pitch angle in degrees.")]
     [SerializeField] private float maxPitch = 60f;
 
-    [Tooltip("If true, invert vertical mouse look.")]
-    [SerializeField] private bool invertY = false;
+    [Header("Fallback Keys")]
+    [Tooltip("Used only if settings cannot resolve a binding.")]
+    [SerializeField] private Key fallbackToggleFreeCursorKey = Key.Period;
 
-    [Header("Cursor / Mode Keys")]
-    [Tooltip("Key used to toggle the temporary free-cursor mode.")]
-    [SerializeField] private Key toggleFreeCursorKey = Key.Period;
-
-    [Tooltip("Key used to toggle the general menu cursor mode.")]
-    [SerializeField] private Key toggleMenuKey = Key.Tab;
+    [Tooltip("Used only if settings cannot resolve a binding.")]
+    [SerializeField] private Key fallbackToggleMenuKey = Key.Tab;
 
     [Header("Startup")]
     [Tooltip("If true, the player starts in locked gameplay look mode when they spawn.")]
     [SerializeField] private bool startLockedInGameplay = true;
 
-    /// <summary>
-    /// Optional event so UI or other systems can react later.
-    /// For now, this is just a clean extensibility point.
-    /// </summary>
     public event Action<CursorModeState> CursorModeChanged;
 
-    /// <summary>
-    /// Current cursor / look mode.
-    /// </summary>
     public CursorModeState CurrentCursorMode { get; private set; } = CursorModeState.GameplayLocked;
 
-    /// <summary>
-    /// Current vertical pitch angle in degrees.
-    /// We store this explicitly rather than reading Euler angles back from the transform.
-    /// </summary>
     private float _pitchDegrees;
 
     public override void OnNetworkSpawn()
@@ -117,15 +59,15 @@ public class PlayerLookController : NetworkBehaviour
             return;
         }
 
+        GameSettingsService.GetOrCreate();
+
         if (cameraPivot == null)
         {
-            Debug.LogError("[PlayerLookController] No cameraPivot assigned.");
+            Debug.LogError("[PlayerLookController] No cameraPivot assigned.", this);
             enabled = false;
             return;
         }
 
-        // Initialize pitch from the pivot's current local rotation if desired.
-        // For this first version, we start from zero for clarity.
         _pitchDegrees = 0f;
 
         if (startLockedInGameplay)
@@ -145,16 +87,15 @@ public class PlayerLookController : NetworkBehaviour
             return;
         }
 
-        Keyboard keyboard = Keyboard.current;
         Mouse mouse = Mouse.current;
 
-        if (keyboard == null || mouse == null)
+        if (mouse == null)
         {
             return;
         }
 
-        HandleModeToggleInput(keyboard);
-        HandleMovementRelock(keyboard);
+        HandleModeToggleInput();
+        HandleMovementRelock();
 
         if (CurrentCursorMode == CursorModeState.GameplayLocked)
         {
@@ -162,20 +103,14 @@ public class PlayerLookController : NetworkBehaviour
         }
     }
 
-    /// <summary>
-    /// Processes the three cursor-mode toggle keys.
-    /// </summary>
-    private void HandleModeToggleInput(Keyboard keyboard)
+    private void HandleModeToggleInput()
     {
-        // During conversation, do not allow '.' or Tab to change cursor mode.
-        // Conversation open/close should be controlled by the conversation system.
         if (CurrentCursorMode == CursorModeState.ConversationCursor)
         {
             return;
         }
 
-        // '.' toggles the temporary free-cursor mode.
-        if (keyboard[toggleFreeCursorKey].wasPressedThisFrame)
+        if (RocInput.WasPressedThisFrame(KeybindActionId.ToggleFreeCursor, fallbackToggleFreeCursorKey))
         {
             if (CurrentCursorMode == CursorModeState.MenuCursor)
             {
@@ -194,8 +129,7 @@ public class PlayerLookController : NetworkBehaviour
             return;
         }
 
-        // Tab toggles the menu mode.
-        if (keyboard[toggleMenuKey].wasPressedThisFrame)
+        if (RocInput.WasPressedThisFrame(KeybindActionId.ToggleMenu, fallbackToggleMenuKey))
         {
             if (CurrentCursorMode == CursorModeState.MenuCursor)
             {
@@ -205,18 +139,10 @@ public class PlayerLookController : NetworkBehaviour
             {
                 SetCursorMode(CursorModeState.MenuCursor);
             }
-
-            return;
         }
     }
 
-    /// <summary>
-    /// If the player is only in temporary free-cursor mode,
-    /// movement input relocks them back into gameplay.
-    ///
-    /// This does NOT affect the full menu mode.
-    /// </summary>
-    private void HandleMovementRelock(Keyboard keyboard)
+    private void HandleMovementRelock()
     {
         if (CurrentCursorMode != CursorModeState.TemporaryFreeCursor)
         {
@@ -224,10 +150,10 @@ public class PlayerLookController : NetworkBehaviour
         }
 
         bool movementPressed =
-            keyboard.wKey.isPressed ||
-            keyboard.aKey.isPressed ||
-            keyboard.sKey.isPressed ||
-            keyboard.dKey.isPressed;
+            RocInput.IsPressed(KeybindActionId.MoveForward, Key.W) ||
+            RocInput.IsPressed(KeybindActionId.MoveBackward, Key.S) ||
+            RocInput.IsPressed(KeybindActionId.MoveLeft, Key.A) ||
+            RocInput.IsPressed(KeybindActionId.MoveRight, Key.D);
 
         if (movementPressed)
         {
@@ -235,42 +161,28 @@ public class PlayerLookController : NetworkBehaviour
         }
     }
 
-    /// <summary>
-    /// Applies mouse look to:
-    /// - player root yaw
-    /// - camera pivot pitch
-    /// </summary>
     private void ApplyMouseLook(Mouse mouse)
     {
+        AccountSettingsData accountSettings = GameSettingsService.Instance.AccountSettings;
+        float sensitivityMultiplier = accountSettings != null ? accountSettings.mouseSensitivity : 1f;
+        bool invertY = accountSettings != null && accountSettings.invertY;
+
         Vector2 mouseDelta = mouse.delta.ReadValue();
 
-        // Horizontal mouse movement rotates the player root around Y.
-        float yawDelta = mouseDelta.x * yawSensitivity;
+        float yawDelta = mouseDelta.x * baseYawSensitivity * sensitivityMultiplier;
         transform.Rotate(0f, yawDelta, 0f, Space.Self);
 
-        // Vertical mouse movement rotates only the camera pivot.
-        float pitchInput = mouseDelta.y * pitchSensitivity;
+        float pitchInput = mouseDelta.y * basePitchSensitivity * sensitivityMultiplier;
 
         if (!invertY)
         {
-            // Standard look behavior:
-            // moving mouse up should look upward, which means decreasing downward pitch.
             pitchInput = -pitchInput;
         }
 
         _pitchDegrees = Mathf.Clamp(_pitchDegrees + pitchInput, minPitch, maxPitch);
-
         cameraPivot.localRotation = Quaternion.Euler(_pitchDegrees, 0f, 0f);
     }
 
-    /// <summary>
-    /// Centralized cursor mode setter.
-    ///
-    /// This is where we control:
-    /// - Cursor.lockState
-    /// - Cursor.visible
-    /// - internal mode tracking
-    /// </summary>
     public void SetCursorMode(CursorModeState newMode)
     {
         CurrentCursorMode = newMode;
@@ -278,42 +190,22 @@ public class PlayerLookController : NetworkBehaviour
         switch (CurrentCursorMode)
         {
             case CursorModeState.GameplayLocked:
-            {
                 Cursor.lockState = CursorLockMode.Locked;
                 Cursor.visible = false;
                 break;
-            }
 
             case CursorModeState.TemporaryFreeCursor:
-            {
-                Cursor.lockState = CursorLockMode.None;
-                Cursor.visible = true;
-                break;
-            }
-
             case CursorModeState.MenuCursor:
-            {
-                Cursor.lockState = CursorLockMode.None;
-                Cursor.visible = true;
-                break;
-            }
-
             case CursorModeState.ConversationCursor:
-            {
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;
                 break;
-            }
         }
 
         CursorModeChanged?.Invoke(CurrentCursorMode);
-
-        Debug.Log($"[PlayerLookController] Cursor mode changed to {CurrentCursorMode}.");
+        Debug.Log($"[PlayerLookController] Cursor mode changed to {CurrentCursorMode}.", this);
     }
 
-    /// <summary>
-    /// Useful helper if other systems later need to ask whether camera look is active.
-    /// </summary>
     public bool IsGameplayLookActive()
     {
         return CurrentCursorMode == CursorModeState.GameplayLocked;
@@ -326,7 +218,6 @@ public class PlayerLookController : NetworkBehaviour
             return;
         }
 
-        // Be polite on despawn / scene unload.
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible = true;
     }

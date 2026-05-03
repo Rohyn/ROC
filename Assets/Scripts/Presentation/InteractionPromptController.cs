@@ -1,17 +1,12 @@
-using Unity.Netcode;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 /// <summary>
 /// Persistent controller that connects the local player's interaction selector
 /// to a screen-space interaction prompt.
-///
-/// RESPONSIBILITIES:
-/// - find the local player's PlayerInteractionSelector
-/// - subscribe to target changes
-/// - show / hide the prompt
-/// - update prompt position every frame while a target exists
-///
-/// This is designed to live on a persistent object such as AppRoot or UIRoot.
+/// 
+/// This version displays the current account/character keybind for Interact
+/// instead of hardcoding "E".
 /// </summary>
 [DisallowMultipleComponent]
 public class InteractionPromptController : MonoBehaviour
@@ -23,6 +18,10 @@ public class InteractionPromptController : MonoBehaviour
     [Header("World Tracking")]
     [Tooltip("Optional world-space offset applied above the interactable focus position.")]
     [SerializeField] private Vector3 worldOffset = new Vector3(0f, 0.2f, 0f);
+
+    [Header("Display")]
+    [SerializeField] private string promptSeparator = " - ";
+    [SerializeField] private Key fallbackInteractKey = Key.E;
 
     [Header("Selector Binding")]
     [Tooltip("How often to retry finding the local player's selector when not currently bound.")]
@@ -38,6 +37,8 @@ public class InteractionPromptController : MonoBehaviour
 
     private void Awake()
     {
+        GameSettingsService.GetOrCreate();
+
         if (promptView == null)
         {
             promptView = FindFirstObjectByType<InteractionPromptView>();
@@ -52,16 +53,21 @@ public class InteractionPromptController : MonoBehaviour
     private void OnEnable()
     {
         TryBindLocalSelector(force: true);
+        GameSettingsService.Instance.KeybindsChanged += RefreshPromptImmediate;
     }
 
     private void OnDisable()
     {
         UnbindSelector();
+
+        if (GameSettingsService.GetOrCreate() != null)
+        {
+            GameSettingsService.Instance.KeybindsChanged -= RefreshPromptImmediate;
+        }
     }
 
     private void Update()
     {
-        // If we do not currently have a selector, keep retrying periodically.
         if (_boundSelector == null)
         {
             if (Time.time >= _nextSelectorSearchTime)
@@ -78,7 +84,6 @@ public class InteractionPromptController : MonoBehaviour
             return;
         }
 
-        // If the selector exists but the current target is null, hide the prompt.
         if (_currentTarget == null)
         {
             if (promptView != null)
@@ -92,9 +97,6 @@ public class InteractionPromptController : MonoBehaviour
         UpdatePromptPosition();
     }
 
-    /// <summary>
-    /// Attempts to find and bind to the local player's interaction selector.
-    /// </summary>
     private void TryBindLocalSelector(bool force)
     {
         if (!force && _boundSelector != null)
@@ -108,6 +110,7 @@ public class InteractionPromptController : MonoBehaviour
         for (int i = 0; i < selectors.Length; i++)
         {
             PlayerInteractionSelector selector = selectors[i];
+
             if (selector == null)
             {
                 continue;
@@ -168,65 +171,75 @@ public class InteractionPromptController : MonoBehaviour
         RefreshPromptImmediate();
     }
 
-    /// <summary>
-    /// Immediately updates prompt visibility/text based on the current target.
-    /// Position is still maintained every frame afterward.
-    /// </summary>
-	private void RefreshPromptImmediate()
-	{
-	    if (promptView == null)
-	    {
-	        return;
-	    }
+    private void RefreshPromptImmediate()
+    {
+        if (promptView == null)
+        {
+            return;
+        }
 
-	    if (_currentTarget == null)
-	    {
-	        promptView.Hide();
-	        return;
-	    }
+        if (_currentTarget == null)
+        {
+            promptView.Hide();
+            return;
+        }
 
-	    promptView.Show($"E - {_currentTarget.InteractionPrompt}");
-	    UpdatePromptPosition();
-	}
+        promptView.Show(BuildPromptText());
+        UpdatePromptPosition();
+    }
 
-    /// <summary>
-    /// Updates the prompt's screen position so it stays near the interactable's focus point.
-    /// </summary>
-	private void UpdatePromptPosition()
-	{
-	    if (promptView == null || _currentTarget == null)
-	    {
-	        return;
-	    }
+    private string BuildPromptText()
+    {
+        string interactKey = ControlPromptFormatter.GetActionDisplay(
+            KeybindActionId.Interact,
+            fallbackInteractKey,
+            wrapKeysInBrackets: false);
 
-	    Camera worldCamera = Camera.main;
-	    if (worldCamera == null)
-	    {
-	        promptView.Hide();
-	        return;
-	    }
+        string interactionText = _currentTarget != null
+            ? _currentTarget.InteractionPrompt
+            : string.Empty;
 
-	    Vector3 referencePosition = _boundSelector != null
+        return $"{interactKey}{promptSeparator}{interactionText}";
+    }
+
+    private void UpdatePromptPosition()
+    {
+        if (promptView == null || _currentTarget == null)
+        {
+            return;
+        }
+
+        Camera worldCamera = Camera.main;
+
+        if (worldCamera == null)
+        {
+            promptView.Hide();
+            return;
+        }
+
+        Vector3 referencePosition = _boundSelector != null
             ? _boundSelector.transform.position
             : worldCamera.transform.position;
 
-        Vector3 worldPosition = _currentTarget.GetBestInteractionFocusPosition(referencePosition) + worldOffset;
-	    Vector3 screenPosition = worldCamera.WorldToScreenPoint(worldPosition);
+        Vector3 worldPosition =
+            _currentTarget.GetBestInteractionFocusPosition(referencePosition) + worldOffset;
 
-	    // If the point is behind the camera, hide the prompt.
-	    if (screenPosition.z <= 0f)
-	    {
-	        promptView.Hide();
-	        return;
-	    }
+        Vector3 screenPosition = worldCamera.WorldToScreenPoint(worldPosition);
 
-	    Camera uiCamera = null;
-	    Canvas canvas = promptView.GetRootCanvas();
-	    if (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay)
-	    {
-	        uiCamera = canvas.worldCamera != null ? canvas.worldCamera : worldCamera;
-	    }
+        if (screenPosition.z <= 0f)
+        {
+            promptView.Hide();
+            return;
+        }
 
-	    promptView.SetScreenPosition(screenPosition, uiCamera);
-	}
+        Camera uiCamera = null;
+        Canvas canvas = promptView.GetRootCanvas();
+
+        if (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+        {
+            uiCamera = canvas.worldCamera != null ? canvas.worldCamera : worldCamera;
+        }
+
+        promptView.SetScreenPosition(screenPosition, uiCamera);
+    }
 }

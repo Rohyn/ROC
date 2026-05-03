@@ -15,14 +15,15 @@ MonoBehaviour:
   promptId: intro.aidan.wake
   channel: 1
   speakerName: Aidan
-  messageText: "Oh, you\u2019re awake. Go on then, hop out of bed. Press E to interact
-    with the bed."
+  messageText: "Oh, you\u2019re awake. Go on then, hop out of bed. Press {interact}
+    to interact with the bed."
   priority: 300
   displaySeconds: 4
   cooldownSeconds: 0
   repeatMode: 1
   conditions:
     suppressWhileConversationOpen: 1
+    requirePromptReadinessWhenGateExists: 1
     requiredCurrentAreaSceneNames:
     - Area_Intro
     blockedCurrentAreaSceneNames: []

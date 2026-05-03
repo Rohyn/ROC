@@ -15,7 +15,7 @@ MonoBehaviour:
   promptId: intro.aidan.equip
   channel: 1
   speakerName: Aidan
-  messageText: Good - don't forget to wear those. Use TAB to access your inventory
+  messageText: Good - don't forget to wear those. Use {menu} to access your inventory
     and RMB to equip your new clothing.
   priority: 295
   displaySeconds: 4
@@ -23,6 +23,7 @@ MonoBehaviour:
   repeatMode: 1
   conditions:
     suppressWhileConversationOpen: 1
+    requirePromptReadinessWhenGateExists: 1
     requiredCurrentAreaSceneNames:
     - Area_Intro
     blockedCurrentAreaSceneNames: []

@@ -5,15 +5,8 @@ using UnityEngine.SceneManagement;
 
 /// <summary>
 /// Handles the owning player's interaction input.
-///
-/// DESIGN:
-/// - Client selects a nearby interactable locally for responsive UX.
-/// - Client sends only the selected interactable's stable ID to the server.
-/// - Server resolves that ID in the player's authoritative current area.
-/// - Server validates range/availability through GenericInteractable.CanInteract(...).
-/// - Server executes the interaction authoritatively.
-///
-/// This avoids requiring authored/static scene interactables to be spawned NetworkObjects.
+/// 
+/// This version uses configurable keybinds through RocInput.
 /// </summary>
 [DisallowMultipleComponent]
 public class PlayerInteractor : NetworkBehaviour
@@ -21,6 +14,10 @@ public class PlayerInteractor : NetworkBehaviour
     [Header("References")]
     [Tooltip("Reference to the interaction selector on this player. If left empty, it will be found automatically.")]
     [SerializeField] private PlayerInteractionSelector interactionSelector;
+
+    [Header("Fallback Input")]
+    [Tooltip("Used only if settings cannot resolve the Interact binding.")]
+    [SerializeField] private Key fallbackInteractKey = Key.E;
 
     [Header("Debug")]
     [Tooltip("If true, interaction attempts and failures will be logged.")]
@@ -45,13 +42,7 @@ public class PlayerInteractor : NetworkBehaviour
             return;
         }
 
-        Keyboard keyboard = Keyboard.current;
-        if (keyboard == null)
-        {
-            return;
-        }
-
-        if (keyboard.eKey.wasPressedThisFrame)
+        if (RocInput.WasPressedThisFrame(KeybindActionId.Interact, fallbackInteractKey))
         {
             RequestInteractCurrentTarget();
         }

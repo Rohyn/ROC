@@ -281,7 +281,17 @@ MonoBehaviour:
   verticalOffset: 0.2
   sideOffset: 0
   cameraFieldOfView: 65
+  obstructionMask:
+    serializedVersion: 2
+    m_Bits: 8
+  collisionRadius: 0.25
+  surfacePadding: 0.08
+  minimumCameraDistance: 0.45
+  blockedSmoothTime: 0.035
+  restoreSmoothTime: 0.12
+  nearClipPlane: 0.03
   createCameraIfMissing: 1
+  verboseLogging: 1
 --- !u!114 &-9072884326607108694
 MonoBehaviour:
   m_ObjectHideFlags: 0

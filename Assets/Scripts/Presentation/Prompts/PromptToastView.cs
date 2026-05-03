@@ -3,6 +3,12 @@ using UnityEngine;
 
 /// <summary>
 /// Pure UI view for prompt / bark / guidance text.
+/// 
+/// This version formats control tokens in prompt messages.
+/// Example authored prompt text:
+/// - Press {interact} to use the bed.
+/// - Press {menu} to open your menu.
+/// - Press {key:inventory.toggle} to open inventory.
 /// </summary>
 [DisallowMultipleComponent]
 public class PromptToastView : MonoBehaviour
@@ -14,6 +20,13 @@ public class PromptToastView : MonoBehaviour
     [Header("Text")]
     [SerializeField] private TMP_Text speakerNameText;
     [SerializeField] private TMP_Text messageText;
+
+    [Header("Control Tokens")]
+    [Tooltip("If true, message text can contain keybind tokens like {interact}, {menu}, or {key:interact}.")]
+    [SerializeField] private bool formatControlTokens = true;
+
+    [Tooltip("If true, prompt keys are displayed like [E] instead of E.")]
+    [SerializeField] private bool wrapFormattedKeysInBrackets = true;
 
     private void Awake()
     {
@@ -39,7 +52,9 @@ public class PromptToastView : MonoBehaviour
 
         if (messageText != null)
         {
-            messageText.text = message ?? string.Empty;
+            messageText.text = formatControlTokens
+                ? ControlPromptFormatter.Format(message, wrapFormattedKeysInBrackets)
+                : message ?? string.Empty;
         }
 
         SetVisible(true);
