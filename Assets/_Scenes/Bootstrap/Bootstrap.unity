@@ -2685,6 +2685,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::InteractionPromptController
   promptView: {fileID: 1691865304}
   worldOffset: {x: 0, y: 0.2, z: 0}
+  promptSeparator: ' - '
+  fallbackInteractKey: 19
   selectorSearchIntervalSeconds: 0.5
   verboseLogging: 0
 --- !u!114 &1428322299
@@ -2782,6 +2784,8 @@ MonoBehaviour:
   canvasGroup: {fileID: 516294867}
   speakerNameText: {fileID: 1988749904}
   messageText: {fileID: 297168805}
+  formatControlTokens: 1
+  wrapFormattedKeysInBrackets: 1
 --- !u!114 &1428322305
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -81,7 +81,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalScale: {x: 0.8, y: 0.8, z: 0.8}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1979638916084192685}
@@ -306,13 +306,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PlayerLookController
   ShowTopMostFoldoutHeaderGroup: 1
   cameraPivot: {fileID: 1979638916084192685}
-  yawSensitivity: 0.12
-  pitchSensitivity: 0.1
+  baseYawSensitivity: 0.12
+  basePitchSensitivity: 0.1
   minPitch: -35
   maxPitch: 80
-  invertY: 0
-  toggleFreeCursorKey: 8
-  toggleMenuKey: 3
+  fallbackToggleFreeCursorKey: 8
+  fallbackToggleMenuKey: 3
   startLockedInGameplay: 1
 --- !u!114 &2940125702930771596
 MonoBehaviour:
@@ -426,6 +425,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PlayerInteractor
   ShowTopMostFoldoutHeaderGroup: 1
   interactionSelector: {fileID: 0}
+  fallbackInteractKey: 19
   verboseLogging: 1
 --- !u!114 &-5665974493355275435
 MonoBehaviour:

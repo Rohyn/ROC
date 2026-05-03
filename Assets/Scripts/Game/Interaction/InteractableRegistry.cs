@@ -5,11 +5,15 @@ using UnityEngine.SceneManagement;
 
 /// <summary>
 /// Runtime lookup table for authored/static interactables.
-///
+/// 
 /// Purpose:
 /// - Allows clients to request interaction by stable authored ID.
 /// - Allows the server to resolve that ID inside the player's current logical area.
 /// - Avoids requiring static scene interactables/NPCs to be spawned NetworkObjects.
+///
+/// This version also supports InteractableRegistrySceneOverride. That lets dynamically
+/// spawned NetworkObjects register as belonging to a streamed area scene even if their
+/// GameObject remains in the persistent/network runtime scene for Netcode visibility.
 /// </summary>
 public static class InteractableRegistry
 {
@@ -129,6 +133,43 @@ public static class InteractableRegistry
         }
     }
 
+    /// <summary>
+    /// Removes this interactable from all registry keys.
+    /// Useful when a dynamically spawned object registered once before its
+    /// InteractableRegistrySceneOverride was initialized.
+    /// </summary>
+    public static void UnregisterEverywhere(GenericInteractable interactable)
+    {
+        if (interactable == null)
+        {
+            return;
+        }
+
+        List<RegistryKey> emptyKeys = null;
+
+        foreach (KeyValuePair<RegistryKey, List<GenericInteractable>> pair in _interactablesByKey)
+        {
+            pair.Value.Remove(interactable);
+            CleanupList(pair.Value);
+
+            if (pair.Value.Count == 0)
+            {
+                emptyKeys ??= new List<RegistryKey>();
+                emptyKeys.Add(pair.Key);
+            }
+        }
+
+        if (emptyKeys == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < emptyKeys.Count; i++)
+        {
+            _interactablesByKey.Remove(emptyKeys[i]);
+        }
+    }
+
     public static bool TryGet(
         string sceneName,
         string interactableId,
@@ -192,6 +233,14 @@ public static class InteractableRegistry
         if (interactable == null)
         {
             return string.Empty;
+        }
+
+        InteractableRegistrySceneOverride sceneOverride =
+            interactable.GetComponentInParent<InteractableRegistrySceneOverride>();
+
+        if (sceneOverride != null && !string.IsNullOrWhiteSpace(sceneOverride.SceneNameOverride))
+        {
+            return sceneOverride.SceneNameOverride.Trim();
         }
 
         Scene scene = interactable.gameObject.scene;
